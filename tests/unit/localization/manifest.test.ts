@@ -1079,4 +1079,25 @@ describe("extension manifest", () => {
             expect(nls[`command.github.${command.split(".").at(-1)}`]).toBeTruthy();
         }
     });
+
+    it("contributes the repository scan max depth setting", () => {
+        const manifest = JSON.parse(
+            readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+        ) as ExtensionManifest;
+        const setting =
+            manifest.contributes?.configuration?.properties?.["intelligit.repositoryScanMaxDepth"];
+
+        expect(setting).toMatchObject({
+            type: "integer",
+            default: 2,
+            minimum: -1,
+            scope: "resource",
+            markdownDescription: "%configuration.repositoryScanMaxDepth.markdownDescription%",
+        });
+
+        const nls = JSON.parse(
+            readFileSync(path.join(process.cwd(), "package.nls.json"), "utf8"),
+        ) as Record<string, string>;
+        expect(nls["configuration.repositoryScanMaxDepth.markdownDescription"]).toBeTruthy();
+    });
 });

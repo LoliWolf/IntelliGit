@@ -116,5 +116,6 @@
     "command.github.shareProject": "GitHub でプロジェクトを共有",
     "command.github.cloneRepository": "GitHub からリポジトリをクローン...",
     "command.github.manageAccounts": "GitHub アカウントを管理...",
-    "command.fileManageRemotes": "リモートを管理…"
+    "command.fileManageRemotes": "リモートを管理…",
+    "configuration.repositoryScanMaxDepth.markdownDescription": "リポジトリ検出時にワークスペースフォルダー内の Git リポジトリをスキャンする深さを制御します。デフォルトは 2 です。深さ制限なしでスキャンするには -1 に設定します。"
 }

@@ -116,5 +116,6 @@
     "command.github.shareProject": "Опубликовать проект на GitHub",
     "command.github.cloneRepository": "Клонировать репозиторий с GitHub...",
     "command.github.manageAccounts": "Управление учётными записями GitHub...",
-    "command.fileManageRemotes": "Управление удалёнными репозиториями…"
+    "command.fileManageRemotes": "Управление удалёнными репозиториями…",
+    "configuration.repositoryScanMaxDepth.markdownDescription": "Управляет глубиной сканирования папок рабочей области для поиска репозиториев Git при обнаружении репозиториев. По умолчанию: 2. Установите -1 для сканирования без ограничения глубины."
 }

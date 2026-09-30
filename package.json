@@ -2,7 +2,7 @@
     "name": "intelligit",
     "displayName": "IntelliGit",
     "description": "%extension.description%",
-    "version": "0.35.21",
+    "version": "0.36.0",
     "publisher": "MaheshKok",
     "icon": "media/intelligit-icon.png",
     "license": "MIT",
@@ -1368,6 +1368,13 @@
                     "type": "boolean",
                     "default": true,
                     "markdownDescription": "%configuration.tooltips.enabled.markdownDescription%"
+                },
+                "intelligit.repositoryScanMaxDepth": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": -1,
+                    "scope": "resource",
+                    "markdownDescription": "%configuration.repositoryScanMaxDepth.markdownDescription%"
                 },
                 "intelligit.shelf.recordBaseRevisions": {
                     "type": "boolean",

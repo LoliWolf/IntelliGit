@@ -116,5 +116,6 @@
     "command.github.shareProject": "Partilhar projeto no GitHub",
     "command.github.cloneRepository": "Clonar repositório do GitHub...",
     "command.github.manageAccounts": "Gerir contas GitHub...",
-    "command.fileManageRemotes": "Gerir remotos…"
+    "command.fileManageRemotes": "Gerir remotos…",
+    "configuration.repositoryScanMaxDepth.markdownDescription": "Controla a profundidade usada para procurar repositórios Git dentro das pastas da área de trabalho durante a descoberta de repositórios. O padrão é 2. Defina como -1 para procurar sem limite de profundidade."
 }

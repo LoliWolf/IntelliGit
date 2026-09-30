@@ -5,6 +5,16 @@ All notable changes to IntelliGit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-09-30
+
+### Added
+
+- Added `intelligit.repositoryScanMaxDepth` to control repository discovery per workspace folder. The default is 2 directory levels; use `0` to scan only the workspace root or `-1` for unlimited depth.
+
+### Changed
+
+- Repository discovery now limits filesystem traversal by default, avoiding deep scans of large workspace trees. Set the scan depth higher if nested repositories are more than two levels below a workspace folder.
+
 ## [0.35.21] - 2026-09-28
 
 ### Added

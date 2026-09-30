@@ -116,5 +116,6 @@
     "command.github.shareProject": "Projekt auf GitHub teilen",
     "command.github.cloneRepository": "Repository von GitHub klonen...",
     "command.github.manageAccounts": "GitHub-Konten verwalten...",
-    "command.fileManageRemotes": "Remotes verwalten…"
+    "command.fileManageRemotes": "Remotes verwalten…",
+    "configuration.repositoryScanMaxDepth.markdownDescription": "Steuert die Tiefe, bis zu der bei der Repository-Erkennung in Arbeitsbereichsordnern nach Git-Repositories gesucht wird. Standardwert ist 2. Auf -1 setzen, um ohne Tiefenbegrenzung zu suchen."
 }
