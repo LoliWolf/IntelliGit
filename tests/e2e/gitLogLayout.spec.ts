@@ -40,22 +40,22 @@ test("Git Log fills its webview without host body gutters at every window width"
                     browserWindow.setContentSize(nextWidth, 900);
                 }, width);
                 await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
-                // Resizing can replace the webview; reacquire and measure the same live frame.
+                // Resizing can replace VS Code's active webview frame during measurement.
                 await expect(async () => {
                     const graph = await view.revealPanel();
                     await expect(graph.getByTestId("commit-list-viewport")).toBeVisible();
-                    if (hostStyle === "legacy-unlayered") {
-                        // Cursor injects these defaults without a cascade layer. Reapply them
-                        // to replacement frames without accumulating styles during retries.
-                        await graph.locator("head").evaluate((head) => {
-                            if (head.querySelector("#git-log-layout-legacy-defaults")) return;
-                            const defaults = document.createElement("style");
-                            defaults.id = "git-log-layout-legacy-defaults";
-                            defaults.textContent = "body { margin: 0; padding: 0 20px; }";
-                            head.prepend(defaults);
-                        });
-                    }
-                    const bounds = await graph.locator("#root").evaluate((root) => {
+                    const bounds = await graph.locator("#root").evaluate((root, style) => {
+                        if (style === "legacy-unlayered") {
+                            // Inject and measure in the same document so a replacement frame
+                            // cannot accidentally bypass Cursor's unlayered host CSS check.
+                            let defaults = document.getElementById("e2e-legacy-host-style");
+                            if (!defaults) {
+                                defaults = document.createElement("style");
+                                defaults.id = "e2e-legacy-host-style";
+                                defaults.textContent = "body { margin: 0; padding: 0 20px; }";
+                                document.head.prepend(defaults);
+                            }
+                        }
                         const rect = root.getBoundingClientRect();
                         const body = getComputedStyle(document.body);
                         return {
@@ -64,7 +64,7 @@ test("Git Log fills its webview without host body gutters at every window width"
                             paddingLeft: body.paddingLeft,
                             paddingRight: body.paddingRight,
                         };
-                    });
+                    }, hostStyle);
                     expect(
                         bounds,
                         `Git Log must meet both webview edges (${hostStyle}, ${width}px)`,
