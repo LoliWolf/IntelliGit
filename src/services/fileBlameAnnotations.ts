@@ -16,6 +16,7 @@ interface BlameSession {
     readonly document: vscode.TextDocument;
     readonly executor: GitExecutor;
     readonly editors: Set<vscode.TextEditor>;
+    readonly controller: AbortController;
     subscription?: vscode.Disposable;
     timer?: ReturnType<typeof setTimeout>;
     running?: Promise<void>;
@@ -91,6 +92,7 @@ export class FileBlameAnnotations implements vscode.Disposable {
             document: editor.document,
             executor: new GitExecutor(target.repoRoot),
             editors: new Set([editor]),
+            controller: new AbortController(),
             generation: 0,
             version: -1,
             lines: [],
@@ -104,7 +106,8 @@ export class FileBlameAnnotations implements vscode.Disposable {
         try {
             await this.refresh(session);
         } catch (error) {
-            if (this.isCurrent(session)) this.hide(target.selectedUri);
+            if (!this.isCurrent(session)) return;
+            this.hide(target.selectedUri);
             throw error;
         }
     }
@@ -128,6 +131,7 @@ export class FileBlameAnnotations implements vscode.Disposable {
         session.generation += 1;
         if (session.timer) clearTimeout(session.timer);
         session.subscription?.dispose();
+        session.controller.abort();
         this.clearEditors(session);
     }
 
@@ -185,15 +189,8 @@ export class FileBlameAnnotations implements vscode.Disposable {
                 );
             }
             const result = await session.executor.runBinary(
-                [
-                    "blame",
-                    "--line-porcelain",
-                    "--contents",
-                    "-",
-                    "--",
-                    session.target.repoRelativePath,
-                ],
-                { input, maxOutputBytes: MAX_BLAME_BYTES },
+                ["blame", "--porcelain", "--contents", "-", "--", session.target.repoRelativePath],
+                { input, maxOutputBytes: MAX_BLAME_BYTES, signal: session.controller.signal },
             );
             if (!this.isCurrent(session)) return;
             if (generation !== session.generation || version !== session.document.version) continue;

@@ -1,4 +1,4 @@
-/** One source line attributed by Git's line-porcelain blame format. */
+/** One source line attributed by Git's porcelain blame format. */
 export interface BlameLine {
     readonly commit: string;
     readonly line: number;
@@ -8,14 +8,16 @@ export interface BlameLine {
     readonly summary: string;
 }
 
-/** Parses line-porcelain records without interpreting source text as metadata. */
+/** Parses porcelain records, reusing commit metadata without interpreting source text. */
 export function parseBlame(output: string): BlameLine[] {
     const result: BlameLine[] = [];
+    const commits = new Map<string, BlameLine>();
     let record: BlameLine | undefined;
     for (const raw of output.split("\n")) {
         if (raw.startsWith("\t")) {
             if (!record) throw new Error("Missing Git blame record.");
             result.push(record);
+            commits.set(record.commit, record);
             record = undefined;
             continue;
         }
@@ -23,12 +25,13 @@ export function parseBlame(output: string): BlameLine[] {
         if (header) {
             if (record) throw new Error("Incomplete Git blame record.");
             record = {
-                commit: header[1],
-                line: Number(header[3]) - 1,
                 author: "",
                 authorTime: 0,
                 authorTimezone: "+0000",
                 summary: "",
+                ...commits.get(header[1]),
+                commit: header[1],
+                line: Number(header[3]) - 1,
             };
         } else if (record) {
             const separator = raw.indexOf(" ");

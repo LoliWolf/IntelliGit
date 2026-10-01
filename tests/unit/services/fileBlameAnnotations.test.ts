@@ -51,7 +51,7 @@ vi.mock("vscode", () => ({
     MarkdownString: class {
         value = "";
         appendText(text: string) {
-            this.value += text.replace(/[\[\]*]/g, "\\$&");
+            this.value += text.replace(/[\\`*_{}\[\]()#+.!-]/g, "\\$&");
             return this;
         }
         appendMarkdown(text: string) {
@@ -138,15 +138,19 @@ describe("FileBlameAnnotations", () => {
         await service.toggle(target);
         expect(mocks.roots).toEqual(["/repo"]);
         expect(mocks.runBinary).toHaveBeenCalledWith(
-            ["blame", "--line-porcelain", "--contents", "-", "--", "source.ts"],
-            { input: Buffer.from(text), maxOutputBytes: 4 * 1024 * 1024 },
+            ["blame", "--porcelain", "--contents", "-", "--", "source.ts"],
+            {
+                input: Buffer.from(text),
+                maxOutputBytes: 4 * 1024 * 1024,
+                signal: expect.any(AbortSignal),
+            },
         );
         expect(mocks.showTextDocument).toHaveBeenCalledWith(uri, { preview: false });
         expect(mocks.createDecoration).toHaveBeenCalledWith(
             expect.objectContaining({ before: expect.objectContaining({ width: "38ch" }) }),
         );
         expect(latest()[0].renderOptions.before.contentText).toBe("aaaaaaaa 2000-01-01 Ada");
-        expect(latest()[0].hoverMessage.value).toContain("\\[bad\\](command:bad)");
+        expect(latest()[0].hoverMessage.value).toContain("\\[bad\\]\\(command:bad\\)");
         expect(latest()[0].hoverMessage.isTrusted).toBeUndefined();
     });
 
@@ -156,6 +160,29 @@ describe("FileBlameAnnotations", () => {
         expect(latest()).toEqual([]);
         expect(mocks.showTextDocument).toHaveBeenCalledTimes(1);
         expect(mocks.subscriptions[0].dispose).toHaveBeenCalledOnce();
+    });
+
+    it("escapes backslashes and Markdown punctuation in hover metadata", async () => {
+        mocks.runBinary.mockResolvedValue(
+            result(
+                output().replace(
+                    "Fix [bad](command:bad)",
+                    String.raw`Fix \[bad](command:bad) *bold*`,
+                ),
+            ),
+        );
+        await service.toggle(target);
+        expect(latest()[0].hoverMessage.value).toContain(
+            String.raw`Fix \\\[bad\]\(command:bad\) \*bold\*`,
+        );
+    });
+
+    it("renders repeated commit metadata from compact porcelain records", async () => {
+        mocks.runBinary.mockResolvedValue(result(output() + `${commit} 2 2\n\t\n`));
+        await service.toggle(target);
+        expect(latest()).toHaveLength(2);
+        expect(latest()[1].renderOptions.before.contentText).toBe("aaaaaaaa 2000-01-01 Ada");
+        expect(latest()[1].hoverMessage.value).toBe(latest()[0].hoverMessage.value);
     });
 
     it("refreshes exact unsaved contents and labels uncommitted lines", async () => {
@@ -273,6 +300,71 @@ describe("FileBlameAnnotations", () => {
         expect(mocks.showErrorMessage).toHaveBeenCalledWith(
             "Annotate with Git Blame failed: missing HEAD",
         );
+    });
+
+    it.each(["toggle", "close", "dispose"])(
+        "cancels an in-flight Git read on %s without reporting a user error",
+        async (action) => {
+            let signal!: AbortSignal;
+            mocks.runBinary.mockImplementationOnce(
+                (_args, options) =>
+                    new Promise((_resolve, reject) => {
+                        signal = options.signal;
+                        signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+                            once: true,
+                        });
+                    }),
+            );
+            const toggling = service.toggle(target);
+            await Promise.resolve();
+            if (action === "toggle") await service.toggle(target);
+            else if (action === "close") mocks.listeners.get("close")?.(document);
+            else service.dispose();
+            await expect(toggling).resolves.toBeUndefined();
+            expect(signal.aborted).toBe(true);
+            expect(latest()).toEqual([]);
+            expect(mocks.subscriptions[0].dispose).toHaveBeenCalledOnce();
+            expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+        },
+    );
+
+    it("starts a replacement session with a fresh signal after cancelling the old read", async () => {
+        mocks.runBinary.mockImplementationOnce(
+            (_args, options) =>
+                new Promise((_resolve, reject) => {
+                    options.signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+                        once: true,
+                    });
+                }),
+        );
+        const first = service.toggle(target);
+        await Promise.resolve();
+        await service.toggle(target);
+        await service.toggle(target);
+        await first;
+        expect(mocks.runBinary.mock.calls[0][1].signal.aborted).toBe(true);
+        expect(mocks.runBinary.mock.calls[1][1].signal.aborted).toBe(false);
+        expect(latest()[0].renderOptions.before.contentText).toContain("Ada");
+    });
+
+    it("cancels background reads and pending refresh timers when annotations are disabled", async () => {
+        await service.toggle(target);
+        mocks.runBinary.mockImplementationOnce(
+            (_args, options) =>
+                new Promise((_resolve, reject) => {
+                    options.signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+                        once: true,
+                    });
+                }),
+        );
+        change();
+        await vi.advanceTimersByTimeAsync(300);
+        change();
+        await service.toggle(target);
+        await vi.advanceTimersByTimeAsync(300);
+        expect(mocks.runBinary).toHaveBeenCalledTimes(2);
+        expect(mocks.runBinary.mock.calls[1][1].signal.aborted).toBe(true);
+        expect(mocks.showErrorMessage).not.toHaveBeenCalled();
     });
 
     it("owns one lazy service per activation and releases its decoration", () => {
