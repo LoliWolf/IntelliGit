@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Annotate with Git Blame** now toggles per-line annotations in the editable source editor instead of opening raw blame output. Shows commit, author date, author, and hover details; follows unsaved edits, saves, split editors, and repository changes.
 
+## [0.36.1] - 2026-09-30
+
+### Added
+
+- Pull and Update on the current branch can save local changes with consent, rebase, and restore tracked edits, staged changes, and ordinary untracked files. A named recovery stash remains after the operation, with separate guidance when the pull or restoration cannot finish.
+
 ## [0.36.0] - 2026-09-30
 
 ### Added
