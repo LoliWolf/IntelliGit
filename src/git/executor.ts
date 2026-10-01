@@ -289,7 +289,7 @@ export class GitExecutor {
  * `EPIPE` means the child was gone before the input landed, which the close handler reports
  * on its own terms; there is nothing left to say about it. `ERR_STREAM_DESTROYED` is only
  * that harmless when this executor destroyed the stream itself by killing a child that
- * overran the output limit -- otherwise the stream died for a reason nobody recorded.
+ * overran the output limit or was cancelled -- otherwise the stream died for an unrecorded reason.
  *
  * Everything else is a genuine write failure, and it has to reach the caller. Git reads the
  * input it was given and exits 0 on what it got, so a swallowed failure here is reported as a

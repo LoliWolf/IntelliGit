@@ -1,3 +1,4 @@
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitOps } from "../../../src/git/operations";
 
@@ -942,7 +943,7 @@ describe("annotateWithGitBlame", () => {
         expect(mocks.getFileBlameAnnotations).toHaveBeenCalledWith(extensionContext);
         expect(mocks.toggleBlame).toHaveBeenCalledWith({
             selectedUri: clicked,
-            canonicalFilePath: "/private/repo/nested/file with spaces.ts",
+            canonicalFilePath: path.join("/private/repo/nested", "file with spaces.ts"),
             repoRoot: "/private/repo",
             repoRelativePath: "nested/file with spaces.ts",
             gitOps: expect.anything(),
