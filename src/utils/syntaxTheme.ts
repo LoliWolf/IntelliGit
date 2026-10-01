@@ -5,12 +5,14 @@ import { parse as parsePlist } from "@plist/xml.parse";
 import * as vscode from "vscode";
 import type { SyntaxTheme, SyntaxThemeRule } from "../webviews/protocol/syntaxTheme";
 
+/** Treats malformed extension metadata and settings as empty objects. */
 function record(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : {};
 }
 
+/** Accepts only VS Code's hex color forms, keeping executable CSS out of webviews. */
 function color(value: unknown): string | undefined {
     return typeof value === "string" &&
         /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(value)
@@ -18,6 +20,7 @@ function color(value: unknown): string | undefined {
         : undefined;
 }
 
+/** Drops unsupported values while retaining contributed VS Code color token names. */
 function colors(value: unknown): Record<string, string> {
     return Object.fromEntries(
         Object.entries(record(value)).flatMap(([key, value]) => {
@@ -27,6 +30,7 @@ function colors(value: unknown): Record<string, string> {
     );
 }
 
+/** Normalizes TextMate scopes and settings without forwarding malformed rules. */
 function rules(value: unknown): SyntaxThemeRule[] {
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
@@ -116,6 +120,7 @@ function matchesTheme(selector: string, names: readonly string[]): boolean {
     });
 }
 
+/** Orders global overrides before matching selectors so theme-specific settings take precedence. */
 function customizations(value: unknown, names: readonly string[]): Record<string, unknown>[] {
     const settings = record(value);
     return [
@@ -136,6 +141,7 @@ const GROUP_SCOPES: Record<string, string[]> = {
     variables: ["variable", "entity.name.variable"],
 };
 
+/** Expands editor token groups before applying explicit TextMate rules. */
 function customizationRules(settings: Record<string, unknown>): SyntaxThemeRule[] {
     const groups = Object.entries(GROUP_SCOPES).flatMap(([key, scope]) => {
         const value = settings[key];

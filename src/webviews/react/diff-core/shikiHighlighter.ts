@@ -67,6 +67,7 @@ const CACHE_MAX = 5000;
 const themeKeys = new WeakMap<SyntaxTheme, number>();
 let nextThemeKey = 0;
 
+/** Keys custom themes by identity so same-name live updates cannot reuse stale tokens. */
 function themeKey(theme: ShikiTheme): string {
     if (typeof theme === "string") return theme;
     let key = themeKeys.get(theme);

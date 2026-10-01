@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.3] - 2026-10-02
+
 ### Changed
 
 - Diff viewers and file-history previews now follow the active VS Code color theme, including TextMate syntax rules, inherited and legacy themes, token-color customizations, and directional diff highlights. Theme changes update open views without replacing document content or discarding editable drafts. The three-way merge editor retains its existing palette.
