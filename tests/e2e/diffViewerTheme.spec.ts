@@ -19,6 +19,7 @@ const THEMES = [
         kind: "vscode-dark",
         background: "#152025",
         foreground: "#e4eef2",
+        comment: "#87bba2",
     },
     {
         id: "IntelliGit Test Light",
@@ -26,6 +27,7 @@ const THEMES = [
         kind: "vscode-light",
         background: "#f4f8fa",
         foreground: "#142026",
+        comment: "#276847",
     },
     {
         id: "IntelliGit Test HC",
@@ -33,6 +35,7 @@ const THEMES = [
         kind: "vscode-high-contrast",
         background: "#000000",
         foreground: "#ffffff",
+        comment: "#8ee89f",
     },
     {
         id: "IntelliGit Test HC Light",
@@ -40,6 +43,7 @@ const THEMES = [
         kind: "vscode-high-contrast-light",
         background: "#ffffff",
         foreground: "#000000",
+        comment: "#0b6130",
     },
 ] as const;
 
@@ -53,7 +57,8 @@ test.describe("Diff follows the active VS Code theme", () => {
         const file = "theme-check.ts";
         const filePath = path.join(workspace.root, file);
         const head =
-            Array.from({ length: 80 }, (_, i) => `const item${i} = "old";`).join("\n") + "\n";
+            Array.from({ length: 80 }, (_, i) => `const item${i} = "old"; // theme`).join("\n") +
+            "\n";
         await writeFile(filePath, head);
         await runGit(workspace.root, ["add", "--", file], workspace.env);
         await runGit(workspace.root, ["commit", "-m", "Theme fixture"], workspace.env);
@@ -96,7 +101,10 @@ test.describe("Diff follows the active VS Code theme", () => {
                         "editor.background": theme.background,
                         "editor.foreground": theme.foreground,
                     },
-                    tokenColors: [{ scope: "storage.type", settings: { foreground: "#776655" } }],
+                    tokenColors: [
+                        { scope: "storage.type", settings: { foreground: "#776655" } },
+                        { scope: "comment", settings: { foreground: theme.comment } },
+                    ],
                 }),
             );
         }
@@ -152,6 +160,10 @@ test.describe("Diff follows the active VS Code theme", () => {
             await expect(keyword).toHaveCSS("color", "rgb(160, 64, 144)");
             await expect(keyword).toHaveCSS("font-style", "italic");
             await expect(string).toHaveCSS("color", "rgb(176, 128, 64)");
+            const comment = frame
+                .locator(".code-line-content span")
+                .filter({ hasText: /^\/\/ theme$/ })
+                .first();
             const editable = frame.locator(".diff-pane-right .diff-segment-modified").first();
             await editable.click();
             const textarea = frame.locator('[data-testid="diff-pane-right-editable"]');
@@ -180,6 +192,11 @@ test.describe("Diff follows the active VS Code theme", () => {
                     theme.kind,
                 );
                 await expect(keyword).toHaveCSS("color", "rgb(160, 64, 144)");
+                const rgb = theme.comment
+                    .slice(1)
+                    .match(/.{2}/g)!
+                    .map((channel) => Number.parseInt(channel, 16));
+                await expect(comment).toHaveCSS("color", `rgb(${rgb.join(", ")})`);
                 await expect(
                     frame.locator(".diff-pane-left .diff-segment-modified").first(),
                 ).toHaveCSS("background-color", "rgba(144, 48, 64, 0.25)");

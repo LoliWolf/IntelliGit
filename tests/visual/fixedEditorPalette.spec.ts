@@ -95,7 +95,33 @@ for (const editable of [false, true]) {
             "background-color",
             await hostColor("var(--vscode-diffEditor-insertedTextBackground, transparent)"),
         );
-        const light = await page
+        const highContrast = await page
+            .locator("body")
+            .evaluate(
+                (body) =>
+                    body.classList.contains("vscode-high-contrast") ||
+                    body.classList.contains("vscode-high-contrast-light"),
+            );
+        if (highContrast) {
+            for (const [area, direction] of [
+                [leftArea, "removed"],
+                [rightArea, "inserted"],
+            ] as const) {
+                const border = await page.evaluate((side) => {
+                    const probe = document.createElement("span");
+                    probe.style.color = `var(--vscode-diffEditor-${side}TextBorder)`;
+                    document.body.append(probe);
+                    const color = getComputedStyle(probe).color;
+                    probe.remove();
+                    return color;
+                }, direction);
+                await expect(area.locator(".word-diff-change").first()).toHaveCSS(
+                    "outline-color",
+                    border,
+                );
+            }
+        }
+        const isLight = await page
             .locator("body")
             .evaluate(
                 (body) =>
@@ -107,7 +133,7 @@ for (const editable of [false, true]) {
                 .locator('.diff-pane-left .diff-segment-modified span[style*="color"]')
                 .filter({ hasText: /^const$/ })
                 .first(),
-        ).toHaveCSS("color", light ? "rgb(0, 0, 255)" : "rgb(86, 156, 214)");
+        ).toHaveCSS("color", isLight ? "rgb(0, 0, 255)" : "rgb(86, 156, 214)");
     });
 }
 

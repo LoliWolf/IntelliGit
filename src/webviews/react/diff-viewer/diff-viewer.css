@@ -321,6 +321,7 @@
     );
     --diff-modified-wash: var(--diff-deleted-wash);
     --diff-word-wash: var(--vscode-diffEditor-removedTextBackground, transparent);
+    --diff-word-border: transparent;
     /* One number for the revert arrow's box AND the strip reserved for it, because a strip
        narrower than its glyph clips it and a wider one leaves the arrow floating away from
        the number it annotates. `App` feeds this same token to
@@ -396,6 +397,7 @@
 /* A modification removes text on the left and inserts text on the right. */
 .diff-viewer .diff-pane-left .diff-segment-modified {
     --diff-word-wash: var(--vscode-diffEditor-removedTextBackground, transparent);
+    --diff-word-border: var(--vscode-diffEditor-removedTextBorder, transparent);
 }
 
 .diff-viewer .diff-pane-right .diff-segment-modified {
@@ -405,6 +407,7 @@
         var(--diff-inserted-wash)
     );
     --diff-word-wash: var(--vscode-diffEditor-insertedTextBackground, transparent);
+    --diff-word-border: var(--vscode-diffEditor-insertedTextBorder, transparent);
 }
 
 /* .diff-segment-empty declares no BACKGROUND, and cannot: each pane is sized from its own
@@ -434,9 +437,11 @@
     --diff-gap-hue: var(--diff-deleted-hue);
 }
 
-/* Partial modified words use the stronger red fill without an underline. */
+/* High-contrast themes use text borders instead of background fills. */
 .diff-viewer .word-diff-change {
     background: var(--diff-word-wash, transparent);
+    outline: 1px solid var(--diff-word-border, transparent);
+    outline-offset: -1px;
     border-radius: 2px;
 }
 

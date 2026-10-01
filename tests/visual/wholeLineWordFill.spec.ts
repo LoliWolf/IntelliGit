@@ -41,6 +41,8 @@ interface MarkSample {
     readonly markAlpha: number;
     /** True when the mark paints a tint the block does not already carry. */
     readonly addsTint: boolean;
+    /** High-contrast themes mark modified words with an outline instead of a wash. */
+    readonly hasOutline: boolean;
     readonly text: string;
 }
 
@@ -100,12 +102,18 @@ async function surveyMarks(page: import("@playwright/test").Page): Promise<MarkS
                 )) {
                     const markRgba = rgbaOf(getComputedStyle(mark).backgroundColor);
                     const markAlpha = Number(markRgba.split(",")[3]);
+                    const style = getComputedStyle(mark);
+                    const outlineAlpha = Number(rgbaOf(style.outlineColor).split(",")[3]);
                     const sample = {
                         state,
                         blockRgba,
                         markRgba,
                         markAlpha,
                         addsTint: markAlpha > 0 && markRgba !== blockRgba,
+                        hasOutline:
+                            outlineAlpha > 0 &&
+                            style.outlineStyle !== "none" &&
+                            Number.parseFloat(style.outlineWidth) > 0,
                         text: (mark.textContent ?? "").slice(0, 40),
                     };
                     (state === "modified" ? twoSided : oneSided).push(sample);
@@ -144,7 +152,7 @@ test.describe("whole-line word fill", () => {
                 `Blocks found: ${JSON.stringify(survey.blockCounts)}`,
         ).toBeGreaterThan(0);
 
-        const doubled = survey.oneSided.filter((sample) => sample.addsTint);
+        const doubled = survey.oneSided.filter((sample) => sample.addsTint || sample.hasOutline);
         // Tallied by state rather than reported as one number: the two directions are separate
         // rules in the stylesheet, and a count alone cannot say whether a fix reached both or
         // only the one whose sample happened to sort first.
@@ -162,10 +170,10 @@ test.describe("whole-line word fill", () => {
 
         // The control. A modified hunk has a counterpart, so "which words changed" has an answer
         // and the mark is the only thing that gives it -- this must keep painting.
-        const marked = survey.twoSided.filter((sample) => sample.addsTint);
+        const marked = survey.twoSided.filter((sample) => sample.addsTint || sample.hasOutline);
         expect(
             marked.length,
-            `no word mark inside a two-sided hunk paints a tint of its own, so a reader cannot ` +
+            `no word mark inside a two-sided hunk paints a tint or outline, so a reader cannot ` +
                 `see which words changed. Samples: ${JSON.stringify(survey.twoSided.slice(0, 3))}`,
         ).toBeGreaterThan(0);
     });
