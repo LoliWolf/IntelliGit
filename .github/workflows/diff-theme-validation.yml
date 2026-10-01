@@ -1,0 +1,34 @@
+name: Diff theme validation
+on:
+    push:
+        branches: [validation/diff-theme]
+permissions:
+    contents: read
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        timeout-minutes: 35
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+            - name: Regenerate only affected baselines in the pinned renderer
+              run: >-
+                  ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build &&
+                  UPDATE_VISUAL_BASELINE=1 bunx playwright test --config playwright.visual.config.ts
+                  tests/visual/nonPixelOracles.spec.ts tests/visual/pixelBaselines.spec.ts
+                  --grep "(diff-viewer|file-history)" --update-snapshots && bun run test:visual'
+            - name: Check source and Linux tests
+              run: >-
+                  ./tests/e2e/docker/run.sh 'bun run typecheck && bun run lint:strict &&
+                  bun run architecture:check && bun run deps:check:strict &&
+                  bun run test && xvfb-run -a bun run test:e2e:diff-viewer'
+            - name: Export affected baselines and screenshots
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  name: diff-theme-baselines
+                  path: |
+                      tests/visual/fixtures/knownFindings.json
+                      tests/visual/__screenshots__/pixelBaselines.spec.ts/*diff-viewer*.png
+                      tests/visual/__screenshots__/pixelBaselines.spec.ts/*file-history*.png
+                      test-results/
+                  retention-days: 3
