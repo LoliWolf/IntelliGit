@@ -239,9 +239,9 @@ describe("DiffViewerApp read-only contract", () => {
         ]);
         const textarea = editBlock(0);
         setDraftText(textarea, "const draftName = 3;", 12);
-            const scroller = document.querySelector<HTMLElement>(".diff-content")!;
-            scroller.scrollTop = 31;
-            const themed = (foreground: string) => ({
+        const scroller = document.querySelector<HTMLElement>(".diff-content")!;
+        scroller.scrollTop = 31;
+        const themed = (foreground: string) => ({
             type: "setSyntaxTheme",
             theme: {
                 name: "intelligit-host-theme",
