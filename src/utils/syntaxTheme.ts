@@ -63,7 +63,18 @@ async function loadTheme(
     const errors: ParseError[] = [];
     const text = await readFile(absolute, "utf8");
     if (path.extname(absolute).toLowerCase() === ".tmtheme") {
-        return { colors: {}, tokenColors: rules(record(parsePlist(text)).settings) };
+        const settings = record(parsePlist(text)).settings;
+        const defaults: unknown = Array.isArray(settings)
+            ? settings.find((entry) => !record(entry).scope)
+            : undefined;
+        const global = record(record(defaults).settings);
+        return {
+            colors: colors({
+                "editor.foreground": global.foreground,
+                "editor.background": global.background,
+            }),
+            tokenColors: rules(settings),
+        };
     }
     const source = record(parse(text, errors, { allowTrailingComma: true }));
     if (errors.length) throw new Error("Invalid color theme JSON.");

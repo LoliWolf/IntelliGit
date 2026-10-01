@@ -174,4 +174,58 @@ describe("active syntax theme", () => {
         state.theme = "";
         expect(await resolveSyntaxTheme()).toBeNull();
     });
+
+    it("retains legacy contributed theme defaults and lets user colors override them", async () => {
+        state.extensions[0].packageJSON = {
+            contributes: {
+                themes: [{ id: "Custom Theme", path: "themes/legacy.tmTheme" }],
+            },
+        };
+        await writeFile(
+            path.join(directory, "themes/legacy.tmTheme"),
+            `<plist version="1.0"><dict><key>settings</key><array>
+            <dict><key>settings</key><dict>
+            <key>foreground</key><string>#abcdef</string>
+            <key>background</key><string>#123456</string></dict></dict>
+            <dict><key>scope</key><string>comment</string><key>settings</key><dict>
+            <key>foreground</key><string>#778899</string></dict></dict>
+            </array></dict></plist>`,
+        );
+        const result = await resolveSyntaxTheme();
+        expect(result?.colors).toEqual({
+            "editor.foreground": "#abcdef",
+            "editor.background": "#123456",
+        });
+        expect(result?.tokenColors).toHaveLength(2);
+        expect(result?.tokenColors[1]).toEqual({
+            scope: "comment",
+            settings: { foreground: "#778899" },
+        });
+        state.colors = { "[Custom Theme]": { "editor.foreground": "#fedcba" } };
+        expect((await resolveSyntaxTheme())?.colors).toEqual({
+            "editor.foreground": "#fedcba",
+            "editor.background": "#123456",
+        });
+    });
+
+    it("sanitizes missing or invalid legacy theme defaults", async () => {
+        state.extensions[0].packageJSON = {
+            contributes: {
+                themes: [{ id: "Custom Theme", path: "themes/legacy.tmTheme" }],
+            },
+        };
+        for (const defaults of [
+            "",
+            "<dict><key>settings</key><dict><key>foreground</key><string>red;display:none</string></dict></dict>",
+        ]) {
+            await writeFile(
+                path.join(directory, "themes/legacy.tmTheme"),
+                `<plist version="1.0"><dict><key>settings</key><array>${defaults}
+                <dict><key>scope</key><string>comment</string><key>settings</key><dict>
+                <key>foreground</key><string>#778899</string></dict></dict>
+                </array></dict></plist>`,
+            );
+            expect((await resolveSyntaxTheme())?.colors).toEqual({});
+        }
+    });
 });
