@@ -30,6 +30,15 @@ describe("porcelain blame", () => {
         expect(parseBlame(record(1).trimEnd())).toHaveLength(1);
     });
 
+    it.each(["Not Committed Yet", "External file (--contents)"])(
+        "preserves version-dependent uncommitted author metadata: %s",
+        (author) => {
+            const hash = "0".repeat(40);
+            const output = record(1, "unsaved", hash).replace("Ada Lovelace", author);
+            expect(parseBlame(output)[0]).toMatchObject({ commit: hash, line: 0, author });
+        },
+    );
+
     it("reuses metadata for contiguous and interleaved short commit headers", () => {
         const secondCommit = "b".repeat(40);
         const second = record(3, "other", secondCommit).replace("Ada Lovelace", "Grace Hopper");

@@ -101,12 +101,12 @@ describe("porcelain blame with real Git", () => {
             first,
             "0".repeat(40),
         ]);
-        expect(lines.map((line) => line.author)).toEqual([
+        // Git's pseudo-author for --contents varies by version; the zero hash is stable.
+        expect(lines.slice(0, 4).map((line) => line.author)).toEqual([
             "Ada Lovelace",
             "Ada Lovelace",
             "Grace Hopper",
             "Ada Lovelace",
-            "Not Committed Yet",
         ]);
         expect(lines[2].summary).toBe(String.raw`Fix \[source] *format*`);
         expect(await readFile(path.join(directory, filename), "utf8")).toBe(disk);

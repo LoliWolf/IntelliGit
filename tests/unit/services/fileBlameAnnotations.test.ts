@@ -185,16 +185,22 @@ describe("FileBlameAnnotations", () => {
         expect(latest()[1].hoverMessage.value).toBe(latest()[0].hoverMessage.value);
     });
 
-    it("refreshes exact unsaved contents and labels uncommitted lines", async () => {
-        await service.toggle(target);
-        text = "unsaved\n";
-        mocks.runBinary.mockResolvedValue(result(output("0".repeat(40))));
-        change();
-        expect(latest()).toEqual([]);
-        await vi.advanceTimersByTimeAsync(300);
-        expect(mocks.runBinary.mock.calls.at(-1)[1].input.toString()).toBe(text);
-        expect(latest()[0].renderOptions.before.contentText).toContain("Uncommitted changes");
-    });
+    it.each(["Not Committed Yet", "External file (--contents)"])(
+        "refreshes unsaved contents and labels zero-hash lines regardless of Git's author: %s",
+        async (author) => {
+            await service.toggle(target);
+            text = "unsaved\n";
+            mocks.runBinary.mockResolvedValue(
+                result(output("0".repeat(40)).replace("author Ada", `author ${author}`)),
+            );
+            change();
+            expect(latest()).toEqual([]);
+            await vi.advanceTimersByTimeAsync(300);
+            expect(mocks.runBinary.mock.calls.at(-1)[1].input.toString()).toBe(text);
+            expect(latest()[0].renderOptions.before.contentText).toContain("Uncommitted changes");
+            expect(latest()[0].hoverMessage.value).toBe("Uncommitted changes");
+        },
+    );
 
     it("accepts an empty editor buffer without falling back to disk", async () => {
         text = "";
