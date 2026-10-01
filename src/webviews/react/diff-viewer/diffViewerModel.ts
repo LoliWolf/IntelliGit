@@ -9,7 +9,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DiffViewerData } from "../../protocol/diffViewerTypes";
 import {
-    detectTheme,
     highlightDocument,
     initShiki,
     isShikiReady,
@@ -23,6 +22,7 @@ import {
 import { DIFF_PANES, segmentRibbonMarker, soleSidedPane, type DiffPane } from "./segmentMarkers";
 import { adjacentChangeIndex, buildStripeMarks, type StripeMark } from "./changeStripe";
 import type { SyntaxHighlightState } from "../diff-core/syntaxHighlightContext";
+import { useDiffSyntaxTheme } from "./useDiffSyntaxTheme";
 import {
     baseMaxLineLengthForSegments,
     effectiveMaxLineLength,
@@ -128,7 +128,7 @@ export function useDiffViewerModel(
     const latestEditingBlockRef = useRef<EditableBlockLayout | null>(null);
     const baseMaxLineLengthRef = useRef(1);
     const [shikiReady, setShikiReady] = useState(() => isShikiReady());
-    const [shikiTheme] = useState(() => detectTheme());
+    const shikiTheme = useDiffSyntaxTheme();
 
     const renderedSegmentCache = useMemo(() => createRenderedSegmentCache(), []);
 

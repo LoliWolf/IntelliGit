@@ -1,7 +1,7 @@
 import { expect, test } from "./playwright/harnessPage";
 
 for (const state of ["modified", "deleted", "inserted"] as const) {
-    test(`${state} diff boundaries blend into the line fill`, async ({
+    test(`${state} diff boundaries use the host change colors`, async ({
         mountHarness,
         page,
     }, testInfo) => {
@@ -14,7 +14,7 @@ for (const state of ["modified", "deleted", "inserted"] as const) {
                 const style = getComputedStyle(element);
                 return {
                     fill: style.backgroundColor,
-                    // Chromium resolves this fixed palette to RGB; unknown syntax fails below.
+                    // Chromium resolves host tokens to RGB; unknown syntax fails below.
                     edges: style.boxShadow.match(/rgba?\([^)]+\)/g) ?? [],
                     height: element.getBoundingClientRect().height,
                 };
@@ -27,11 +27,10 @@ for (const state of ["modified", "deleted", "inserted"] as const) {
                 sample.edges,
                 `${state} must retain three geometry-neutral inset edges`,
             ).toHaveLength(3);
-            // The green side marker stays distinct; red boundaries must all blend into their fill.
-            const edges = state === "inserted" ? sample.edges.slice(1) : sample.edges;
-            expect(edges, `${state} boundary must match its light line fill`).toEqual(
-                edges.map(() => sample.fill),
+            expect(sample.edges[1], `${state} upper/lower brackets must agree`).toBe(
+                sample.edges[2],
             );
+            expect(sample.edges.every((edge) => edge.startsWith("rgb"))).toBe(true);
         }
     });
 }

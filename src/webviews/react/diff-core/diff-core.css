@@ -1,6 +1,5 @@
 /* Shared visual contract for pane-agnostic diff blocks.
-   Editor backgrounds follow the host theme; change highlights retain the fixed palette.
-   knownFindings.json records its subdued syntax and line-number contrast. */
+   The Diff viewer supplies host-themed colors; merge owns its separate change palette. */
 .merge-editor,
 .diff-core {
     --diff-editor-bg: var(--merge-editor-bg, var(--vscode-editor-background, #313845));

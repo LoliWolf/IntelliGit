@@ -16,6 +16,7 @@ import { buildWebviewShellHtml } from "./webviewHtml";
 import { captureWebview } from "../e2e/webviewCapture";
 import { getErrorMessage } from "../utils/errors";
 import { DiffViewerPanel } from "./DiffViewerPanel";
+import { DiffSyntaxThemeService } from "./shared/DiffSyntaxThemeService";
 import type {
     HistoryInbound,
     HistoryOutbound,
@@ -29,10 +30,22 @@ export interface FileHistoryPanelOptions {
     filePath: string;
 }
 
+function isHistorySelection(
+    message: Partial<HistoryOutbound>,
+): message is Extract<HistoryOutbound, { type: "historySelect" }> {
+    return (
+        message.type === "historySelect" &&
+        Array.isArray(message.hashes) &&
+        Number.isSafeInteger(message.requestId) &&
+        message.hashes.every((hash) => typeof hash === "string")
+    );
+}
+
 /** Owns the standalone file history window. */
 export class FileHistoryPanel {
     private static readonly windows = new Map<string, FileHistoryPanel>();
     private readonly executor: GitExecutor;
+    private readonly syntaxTheme: DiffSyntaxThemeService;
     private readonly disposables: vscode.Disposable[] = [];
     private entries: FileHistoryEntry[] = [];
     private ref = "HEAD";
@@ -49,7 +62,12 @@ export class FileHistoryPanel {
         key: string,
     ) {
         this.executor = new GitExecutor(options.repoRoot);
+        this.syntaxTheme = new DiffSyntaxThemeService(
+            panel.webview,
+            vscode.Uri.file(path.resolve(options.repoRoot, options.filePath)),
+        );
         this.disposables.push(
+            this.syntaxTheme,
             panel.webview.onDidReceiveMessage((raw: unknown) => this.receive(raw)),
         );
         panel.onDidDispose(() => {
@@ -107,6 +125,9 @@ export class FileHistoryPanel {
     private async receive(raw: unknown): Promise<void> {
         if (!raw || typeof raw !== "object" || this.closed) return;
         const message = raw as Partial<HistoryOutbound>;
+        if (await this.receiveThemeRequest(message)) {
+            return;
+        }
         try {
             if (message.type === "historyReady") {
                 if (!this.moveStarted) {
@@ -137,13 +158,8 @@ export class FileHistoryPanel {
             } else if (message.type === "historyMore") {
                 this.limit += 100;
                 await this.refresh(false);
-            } else if (
-                message.type === "historySelect" &&
-                Array.isArray(message.hashes) &&
-                Number.isSafeInteger(message.requestId)
-            ) {
-                if (!message.hashes.every((h) => typeof h === "string")) return;
-                await this.select(message as Extract<HistoryOutbound, { type: "historySelect" }>);
+            } else if (isHistorySelection(message)) {
+                await this.select(message);
             } else if (message.type === "historyAction" && typeof message.hash === "string") {
                 const entry = this.entries.find((e) => e.hash === message.hash);
                 if (entry) await this.action(entry, message.action);
@@ -151,6 +167,13 @@ export class FileHistoryPanel {
         } catch (error) {
             await this.post({ type: "historyError", message: getErrorMessage(error) });
         }
+    }
+
+    /** Handles syntax requests separately from history selection and transfer. */
+    private async receiveThemeRequest(message: Partial<HistoryOutbound>): Promise<boolean> {
+        if (message.type !== "requestSyntaxTheme") return false;
+        await this.syntaxTheme.publish();
+        return true;
     }
 
     /** Reloads one immutable ref snapshot, retaining rename continuity when extending the limit. */

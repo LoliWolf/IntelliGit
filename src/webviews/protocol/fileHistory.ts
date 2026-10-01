@@ -1,5 +1,6 @@
 import type { FileHistoryEntry } from "../../git/fileHistoryTypes";
 import type { DiffViewerData } from "./diffViewerTypes";
+import type { SyntaxThemeInbound, SyntaxThemeOutbound } from "./syntaxTheme";
 
 /** A root-bound history snapshot; paths and hashes remain host-validated. */
 export interface FileHistoryState {
@@ -14,6 +15,7 @@ export interface FileHistoryState {
 
 /** Messages accepted by the standalone history host. */
 export type HistoryOutbound =
+    | SyntaxThemeOutbound
     | { type: "historyReady" }
     | { type: "historyRefresh"; ref?: string }
     | { type: "historyMore" }
@@ -28,6 +30,7 @@ export type HistoryOutbound =
 
 /** History responses carry a preview request identifier to reject stale selection results. */
 export type HistoryInbound =
+    | SyntaxThemeInbound
     | { type: "historyState"; state: FileHistoryState }
     | { type: "historyError"; message: string }
     | { type: "historyDiff"; requestId: number; data?: DiffViewerData; error?: string };

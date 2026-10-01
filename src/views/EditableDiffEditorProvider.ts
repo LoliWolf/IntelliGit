@@ -9,6 +9,7 @@ import type {
     TextEditDelta,
 } from "../webviews/protocol/diffViewerTypes";
 import { buildWebviewShellHtml } from "./webviewHtml";
+import { DiffSyntaxThemeService } from "./shared/DiffSyntaxThemeService";
 
 const EDITABLE_DIFF_VIEW_TYPE = "intelligit.editableDiff";
 
@@ -182,6 +183,7 @@ export class EditableDiffEditorProvider implements vscode.CustomTextEditorProvid
 
 /** Keeps the webview as a pure projection of a VS Code-owned text document. */
 class EditableDiffSession {
+    private readonly syntaxTheme: DiffSyntaxThemeService;
     private descriptor: EditableDiffDescriptor;
     private ignoreWhitespace = false;
     private disposed = false;
@@ -223,6 +225,7 @@ class EditableDiffSession {
     ) {
         this.descriptor = descriptor;
         this.lastSeenVersion = document.version;
+        this.syntaxTheme = new DiffSyntaxThemeService(panel.webview, document.uri);
         // `update()` already assigns this on every later descriptor, so without it here the
         // first open is the one render that never applies the descriptor's own title. Whether
         // a custom editor's tab honours it is VS Code's call; the two paths agreeing is ours.
@@ -242,6 +245,7 @@ class EditableDiffSession {
             e2eViewId: "diff-viewer",
         });
         this.disposables = [
+            this.syntaxTheme,
             panel.webview.onDidReceiveMessage((message: unknown) => {
                 // `void` would turn any escaping rejection into an unhandled one in the
                 // extension host, where it is attributed to no feature at all.
@@ -405,6 +409,10 @@ class EditableDiffSession {
 
     private async handleMessage(raw: unknown): Promise<void> {
         const message = raw as { type?: unknown; mode?: unknown; delta?: unknown };
+        if (message.type === "requestSyntaxTheme") {
+            await this.syntaxTheme.publish();
+            return;
+        }
         if (message.type === "ready") {
             await this.render();
             return;

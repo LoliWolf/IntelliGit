@@ -1,25 +1,39 @@
 import { expect, test } from "./playwright/harnessPage";
 
-test("diff gutters, ribbons and collapsed lines use solid change colors", async ({
+test("diff gutters, ribbons and collapsed lines use host change colors", async ({
     mountHarness,
     page,
 }, testInfo) => {
     await mountHarness("diff-viewer", { webviewFixture: "clean.json" });
-    for (const [state, color] of [
-        ["modified", "rgb(75, 21, 21)"],
-        ["deleted", "rgb(75, 21, 21)"],
-        ["inserted", "rgb(38, 75, 51)"],
+    const hostColor = (expression: string) =>
+        page.evaluate((value) => {
+            const probe = document.createElement("span");
+            probe.style.backgroundColor = value;
+            document.body.append(probe);
+            const resolved = getComputedStyle(probe).backgroundColor;
+            probe.remove();
+            return resolved;
+        }, expression);
+    for (const [state, expression] of [
+        ["modified", "var(--vscode-editorGutter-modifiedBackground, #007acc)"],
+        ["deleted", "var(--vscode-editorGutter-deletedBackground, #f14c4c)"],
+        ["inserted", "var(--vscode-editorGutter-addedBackground, #2ea043)"],
     ]) {
+        const color = await hostColor(expression);
+        const direction = state === "inserted" ? "inserted" : "removed";
+        const gutter = await hostColor(
+            `var(--vscode-diffEditorGutter-${direction}LineBackground, var(--vscode-diffEditor-${direction}LineBackground, var(--vscode-diffEditor-${direction}TextBackground, transparent)))`,
+        );
         await expect(
             page.locator(`.diff-pane .diff-segment-${state} .line-numbers`).first(),
-        ).toHaveCSS("background-color", color);
+        ).toHaveCSS("background-color", gutter);
         const ribbon = page.locator(`.diff-ribbon.diff-segment-${state}`).first();
         await expect(ribbon).toHaveCSS("fill", color);
         await expect(ribbon).toHaveCSS("opacity", "1");
     }
     await expect(page.locator(".diff-gap-deleted").first()).toHaveCSS(
         "box-shadow",
-        "rgb(75, 21, 21) 0px 0px 0px 1px",
+        `${await hostColor("var(--vscode-editorGutter-deletedBackground, #f14c4c)")} 0px 0px 0px 1px`,
     );
     await page.screenshot({ path: testInfo.outputPath("diff-gutters.png") });
 });
