@@ -15,12 +15,16 @@ jobs:
                   ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build &&
                   UPDATE_VISUAL_BASELINE=1 bun x playwright test --config playwright.visual.config.ts
                   tests/visual/nonPixelOracles.spec.ts tests/visual/pixelBaselines.spec.ts
-                  --grep "(diff-viewer|file-history)" --update-snapshots && bun run test:visual'
+                  --grep "(diff-viewer|file-history)" --update-snapshots'
             - name: Check source and Linux tests
+              if: always()
               run: >-
                   ./tests/e2e/docker/run.sh 'bun run typecheck && bun run lint:strict &&
                   bun run architecture:check && bun run deps:check:strict &&
-                  bun run test && xvfb-run -a bun run test:e2e:diff-viewer'
+                  bun run test:coverage && xvfb-run -a bun run test:e2e:diff-viewer'
+            - name: Run the complete visual regression suite
+              if: always()
+              run: ./tests/e2e/docker/run.sh 'bun run test:visual'
             - name: Export affected baselines and screenshots
               if: always()
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
