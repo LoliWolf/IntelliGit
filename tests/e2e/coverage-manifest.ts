@@ -482,6 +482,7 @@ const COMMAND_ENTRIES = [
 
 const WEBVIEW_ENTRIES = [
     { kind: "webview", id: "ready", mutating: false },
+    { kind: "webview", id: "requestSyntaxTheme", mutating: false },
     // History reads repository data and opens inspection UI; historyAction also copies hashes.
     // Message contracts: tests/integration/webviews/file-history.integration.test.tsx.
     // Runtime scenario: tests/e2e/fileHistory.spec.ts; this inventory records no pass verdict.
