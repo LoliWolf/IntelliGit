@@ -112,7 +112,12 @@ test("Explorer, tab and editor unstash clicked B by OID while active A stays unc
     const app = await launchFixtureWorkspace({
         executablePath: await resolveVSCodeExecutable(extensionRoot),
         repoRoot: extensionRoot,
-        workspace: fixtureWorkspace.workspace,
+        // Background status reads must not compete with this test's external fixture writes.
+        // Required mutation locks still apply; only optional index-cache writes are disabled.
+        workspace: {
+            ...fixtureWorkspace.workspace,
+            env: { ...env, GIT_OPTIONAL_LOCKS: "0" },
+        },
         channelDir: fixtureWorkspace.channelDir,
         timeout: 60_000,
     });
