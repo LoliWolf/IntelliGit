@@ -71,11 +71,13 @@ updates:
           # First, so it wins the match: a dependency joins the first group whose patterns accept it.
           production-dependencies:
               patterns:
+                  - "@plist/xml.parse"
                   - jsonc-parser
               update-types: ["minor", "patch"]
           safe-development-dependencies:
               patterns:
                   - "*"
               exclude-patterns:
+                  - "@plist/xml.parse"
                   - jsonc-parser
               update-types: ["minor", "patch"]
