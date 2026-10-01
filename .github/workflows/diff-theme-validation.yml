@@ -13,7 +13,7 @@ jobs:
             - name: Regenerate only affected baselines in the pinned renderer
               run: >-
                   ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build &&
-                  UPDATE_VISUAL_BASELINE=1 bunx playwright test --config playwright.visual.config.ts
+                  UPDATE_VISUAL_BASELINE=1 bun x playwright test --config playwright.visual.config.ts
                   tests/visual/nonPixelOracles.spec.ts tests/visual/pixelBaselines.spec.ts
                   --grep "(diff-viewer|file-history)" --update-snapshots && bun run test:visual'
             - name: Check source and Linux tests
