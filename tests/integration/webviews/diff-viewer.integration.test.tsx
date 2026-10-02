@@ -226,11 +226,46 @@ afterEach(async () => {
         app.root?.unmount();
     });
     document.body.replaceChildren();
+    window.getSelection()?.removeAllRanges();
     vi.clearAllMocks();
     vi.resetModules();
 });
 
 describe("DiffViewerApp read-only contract", () => {
+    it("recolors an open draft without reseeding it or changing the scroll position", async () => {
+        const api = installVsCodeMock();
+        await mountEditablePane("const oldName = 1;\n", 4, [
+            { type: "changed", left: ["const oldName = 1;"], right: ["const newName = 2;"] },
+        ]);
+        const textarea = editBlock(0);
+        setDraftText(textarea, "const draftName = 3;", 12);
+        const scroller = document.querySelector<HTMLElement>(".diff-content")!;
+        scroller.scrollTop = 31;
+        const themed = (foreground: string) => ({
+            type: "setSyntaxTheme",
+            theme: {
+                name: "intelligit-host-theme",
+                type: "light",
+                colors: { "editor.foreground": "#112233", "editor.background": "#ffffff" },
+                tokenColors: [{ scope: "storage.type", settings: { foreground } }],
+            },
+        });
+        dispatchHostMessage(themed("#123456"));
+        await flush(4);
+        const keyword = () =>
+            [...document.querySelectorAll<HTMLElement>(".code-line-content span")].find(
+                (span) => span.textContent === "const",
+            );
+        expect(keyword()?.style.color).toBe("rgb(18, 52, 86)");
+        dispatchHostMessage(themed("#654321"));
+        await flush(4);
+        expect(keyword()?.style.color).toBe("rgb(101, 67, 33)");
+        expect(textarea.value).toBe("const draftName = 3;");
+        expect(textarea.selectionStart).toBe(12);
+        expect(scroller.scrollTop).toBe(31);
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "requestSyntaxTheme" });
+    });
+
     it("has no editable or per-hunk action surface", async () => {
         installVsCodeMock();
         createRootHost();

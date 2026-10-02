@@ -12,6 +12,7 @@ import type {
 import { getErrorMessage } from "../utils/errors";
 import { assertRepoRelativePath } from "../utils/fileOps";
 import { buildWebviewShellHtml } from "./webviewHtml";
+import { DiffSyntaxThemeService } from "./shared/DiffSyntaxThemeService";
 
 /** Inputs for one immutable pair of texts shown in the diff viewer. */
 export interface DiffViewerPanelOptions {
@@ -62,6 +63,7 @@ export class DiffViewerPanel {
     private static pendingSession: DiffViewerPanelSessionBinding | undefined;
 
     private disposed = false;
+    private readonly syntaxTheme: DiffSyntaxThemeService;
     private ignoreWhitespace = false;
     private snapshot: DiffViewerSnapshot;
     private loadError: string | undefined;
@@ -74,6 +76,7 @@ export class DiffViewerPanel {
         options: DiffViewerPanelOptions,
     ) {
         this.snapshot = DiffViewerPanel.snapshotFrom(options);
+        this.syntaxTheme = new DiffSyntaxThemeService(panel.webview);
         this.sessionGeneration = options.sessionGeneration;
         this.onSessionDisposed = options.onSessionDisposed;
         panel.webview.html = this.getHtml(panel.webview);
@@ -92,6 +95,7 @@ export class DiffViewerPanel {
 
         panel.onDidDispose(() => {
             this.disposed = true;
+            this.syntaxTheme.dispose();
             const onSessionDisposed = this.onSessionDisposed;
             this.sessionGeneration = undefined;
             this.onSessionDisposed = undefined;
@@ -218,6 +222,10 @@ export class DiffViewerPanel {
     /** Validates and handles the small read-only viewer message protocol. */
     private async handleMessage(raw: unknown): Promise<void> {
         const message = raw as Partial<OutboundMessage>;
+        if (message.type === "requestSyntaxTheme") {
+            await this.syntaxTheme.publish();
+            return;
+        }
         if (message.type === "ready") {
             await this.postLatestData();
             return;

@@ -1,4 +1,5 @@
 // Typed message protocol for the read-only two-pane diff viewer webview.
+import type { SyntaxThemeInbound, SyntaxThemeOutbound } from "./syntaxTheme";
 
 /** Newline metadata for one side of a diff payload. */
 export interface DiffSideMeta {
@@ -90,9 +91,10 @@ export interface TextEditDelta {
 
 /** Commands posted by the diff viewer to the extension host. */
 export type OutboundMessage =
+    | SyntaxThemeOutbound
     | { type: "ready" }
     | { type: "setIgnoreMode"; mode: "none" | "whitespace" }
     | { type: "editText"; delta: TextEditDelta };
 
 /** Messages sent by the extension host to initialize or report the viewer state. */
-export type InboundMessage = { type: "setDiffData"; data: DiffViewerData };
+export type InboundMessage = { type: "setDiffData"; data: DiffViewerData } | SyntaxThemeInbound;

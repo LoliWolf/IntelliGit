@@ -97,9 +97,10 @@ export function useDiffViewerHost(): DiffViewerHost {
     useEffect(() => {
         const handler = (event: MessageEvent<InboundMessage>) => {
             if (event.data.type === "setDiffData") {
-                setError(event.data.data.loadError ?? null);
-                setIgnoreMode(event.data.data.ignoreWhitespace ? "whitespace" : "none");
-                setData((previous) => reconcileDiffViewerData(previous, event.data.data));
+                const next = event.data.data;
+                setError(next.loadError ?? null);
+                setIgnoreMode(next.ignoreWhitespace ? "whitespace" : "none");
+                setData((previous) => reconcileDiffViewerData(previous, next));
             }
         };
         window.addEventListener("message", handler);

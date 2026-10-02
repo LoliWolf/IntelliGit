@@ -164,6 +164,27 @@ describe("highlightLine", () => {
 });
 
 describe("highlightDocument", () => {
+    it("uses host theme rules and invalidates same-name custom theme caches", () => {
+        initShiki();
+        const host = (foreground: string) => ({
+            name: "intelligit-host-theme",
+            type: "light" as const,
+            colors: { "editor.foreground": "#112233", "editor.background": "#ffffff" },
+            tokenColors: [{ scope: "storage.type", settings: { foreground } }],
+        });
+        const first = host("#123456");
+        const second = host("#654321");
+        const line = "const hostTheme = 1;";
+        const tokens = highlightLine(line, "typescript", first);
+        expect(tokens?.find((token) => token.text === "const")?.color).toBe("#123456");
+        expect(tokens?.every((token) => !token.darkColor)).toBe(true);
+        expect(
+            highlightLine(line, "typescript", second)?.find((token) => token.text === "const")
+                ?.color,
+        ).toBe("#654321");
+        expect(highlightDocument([line], "typescript", first)?.[0]).toEqual(tokens);
+    });
+
     const contextualCases: ReadonlyArray<readonly [string, readonly string[], number]> = [
         ["javascript", ["const config = {", '  name: "value",', "};"], 1],
         ["typescript", ["interface User {", "  name: string;", "}"], 1],

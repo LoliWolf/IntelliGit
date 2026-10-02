@@ -14,7 +14,7 @@ async function editorBackground(page: Page): Promise<string> {
 }
 
 for (const editable of [false, true]) {
-    test(`${editable ? "editable" : "read-only"} diff follows the host background with fixed change highlights`, async ({
+    test(`${editable ? "editable" : "read-only"} diff follows the host background and change highlights`, async ({
         mountHarness,
         page,
     }) => {
@@ -62,28 +62,78 @@ for (const editable of [false, true]) {
         );
         const leftArea = page.locator(".diff-pane-left .diff-segment-modified");
         const rightArea = page.locator(".diff-pane-right .diff-segment-modified");
-        await expect(leftArea).toHaveCSS("background-color", "rgb(59, 42, 50)");
-        await expect(
-            rightArea,
-            "both modified areas must use the same classification fill",
-        ).toHaveCSS("background-color", "rgb(59, 42, 50)");
+        const hostColor = (expression: string) =>
+            page.evaluate((value) => {
+                const probe = document.createElement("span");
+                probe.style.backgroundColor = value;
+                document.body.append(probe);
+                const resolved = getComputedStyle(probe).backgroundColor;
+                probe.remove();
+                return resolved;
+            }, expression);
+        await expect(leftArea).toHaveCSS(
+            "background-color",
+            await hostColor(
+                "var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground, transparent))",
+            ),
+        );
+        await expect(rightArea).toHaveCSS(
+            "background-color",
+            await hostColor(
+                "var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground, transparent))",
+            ),
+        );
         await expect(rightArea).toHaveCSS(
             "box-shadow",
             await leftArea.evaluate((area) => getComputedStyle(area).boxShadow),
         );
-        for (const area of [leftArea, rightArea]) {
-            await expect(
-                area.locator(".word-diff-change").first(),
-                "red modified areas must contain dark red word highlights on both panes",
-            ).toHaveCSS("background-color", "rgb(75, 21, 21)");
+        await expect(leftArea.locator(".word-diff-change").first()).toHaveCSS(
+            "background-color",
+            await hostColor("var(--vscode-diffEditor-removedTextBackground, transparent)"),
+        );
+        await expect(rightArea.locator(".word-diff-change").first()).toHaveCSS(
+            "background-color",
+            await hostColor("var(--vscode-diffEditor-insertedTextBackground, transparent)"),
+        );
+        const highContrast = await page
+            .locator("body")
+            .evaluate(
+                (body) =>
+                    body.classList.contains("vscode-high-contrast") ||
+                    body.classList.contains("vscode-high-contrast-light"),
+            );
+        if (highContrast) {
+            for (const [area, direction] of [
+                [leftArea, "removed"],
+                [rightArea, "inserted"],
+            ] as const) {
+                const border = await page.evaluate((side) => {
+                    const probe = document.createElement("span");
+                    probe.style.color = `var(--vscode-diffEditor-${side}TextBorder)`;
+                    document.body.append(probe);
+                    const color = getComputedStyle(probe).color;
+                    probe.remove();
+                    return color;
+                }, direction);
+                await expect(area.locator(".word-diff-change").first()).toHaveCSS(
+                    "outline-color",
+                    border,
+                );
+            }
         }
-        // Dark-plus keyword blue must stay readable even when the host fixture is light.
+        const isLight = await page
+            .locator("body")
+            .evaluate(
+                (body) =>
+                    body.classList.contains("vscode-light") ||
+                    body.classList.contains("vscode-high-contrast-light"),
+            );
         await expect(
             page
                 .locator('.diff-pane-left .diff-segment-modified span[style*="color"]')
                 .filter({ hasText: /^const$/ })
                 .first(),
-        ).toHaveCSS("color", "rgb(86, 156, 214)");
+        ).toHaveCSS("color", isLight ? "rgb(0, 0, 255)" : "rgb(86, 156, 214)");
     });
 }
 

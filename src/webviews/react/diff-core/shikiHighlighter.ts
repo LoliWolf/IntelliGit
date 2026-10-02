@@ -19,9 +19,10 @@ import markdown from "@shikijs/langs/markdown";
 
 import darkPlus from "@shikijs/themes/dark-plus";
 import lightPlus from "@shikijs/themes/light-plus";
+import type { SyntaxTheme } from "../../protocol/syntaxTheme";
 
-/** Bundled Shiki theme name mirroring VS Code's default light/dark themes. */
-export type ShikiTheme = "dark-plus" | "light-plus";
+/** Merge retains bundled colors; Diff viewers can supply the host's TextMate theme. */
+export type ShikiTheme = "dark-plus" | "light-plus" | SyntaxTheme;
 
 /** One grammar-tokenized run with its resolved color and font-style bitmask. */
 export interface ShikiToken {
@@ -63,6 +64,19 @@ let highlighterReady = false;
 // Line-level token cache (capped at 5000 entries to prevent unbounded growth).
 const tokenCache = new Map<string, ShikiToken[] | null>();
 const CACHE_MAX = 5000;
+const themeKeys = new WeakMap<SyntaxTheme, number>();
+let nextThemeKey = 0;
+
+/** Keys custom themes by identity so same-name live updates cannot reuse stale tokens. */
+function themeKey(theme: ShikiTheme): string {
+    if (typeof theme === "string") return theme;
+    let key = themeKeys.get(theme);
+    if (key === undefined) {
+        key = ++nextThemeKey;
+        themeKeys.set(theme, key);
+    }
+    return `host-${key}`;
+}
 
 /** Select bundled syntax colors compatible with the host editor's light or dark surface. */
 export function detectTheme(): ShikiTheme {
@@ -160,7 +174,7 @@ export function highlightLine(line: string, lang: string, theme: ShikiTheme): Sh
     if (!isShikiReady() || !highlighter) return null;
     warmLang(lang, theme);
 
-    const cacheKey = `${line}|${lang}|${theme}`;
+    const cacheKey = JSON.stringify([line, lang, themeKey(theme)]);
     if (tokenCache.has(cacheKey)) return tokenCache.get(cacheKey) ?? null;
 
     try {

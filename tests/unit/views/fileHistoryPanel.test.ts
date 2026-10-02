@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("vscode", () => ({
     ViewColumn: { Active: -1 },
-    Uri: { joinPath: (base: unknown) => base },
+    Uri: { joinPath: (base: unknown) => base, file: (fsPath: string) => ({ fsPath }) },
     l10n: { t: (value: string) => value },
     commands: { executeCommand: mocks.move },
     extensions: { all: [] },

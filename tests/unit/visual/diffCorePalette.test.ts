@@ -233,10 +233,22 @@ describe("diff-core palette", () => {
                 "--diff-editor-fg",
                 "var(--merge-editor-fg, var(--vscode-editor-foreground, #abb2bf))",
             ],
-            [viewerCss, "--diff-inserted-wash", "#264b33"],
-            [viewerCss, "--diff-deleted-wash", "#3b2a32"],
-            [viewerCss, "--diff-modified-wash", "#3b2a32"],
-            [viewerCss, "--diff-word-wash", "#4b1515"],
+            [
+                viewerCss,
+                "--diff-inserted-wash",
+                "var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground, transparent))",
+            ],
+            [
+                viewerCss,
+                "--diff-deleted-wash",
+                "var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground, transparent))",
+            ],
+            [viewerCss, "--diff-modified-wash", "var(--diff-deleted-wash)"],
+            [
+                viewerCss,
+                "--diff-word-wash",
+                "var(--vscode-diffEditor-removedTextBackground, transparent)",
+            ],
             [mergeCss, "--merge-editor-bg", "var(--vscode-editor-background, #313845)"],
             [mergeCss, "--merge-editor-fg", "var(--vscode-editor-foreground, #abb2bf)"],
             [mergeCss, "--merge-conflict-block-bg", "#3b2a32"],
@@ -244,9 +256,11 @@ describe("diff-core palette", () => {
             [mergeCss, "--merge-inserted-block-bg", "#264b33"],
             [mergeCss, "--pycharm-inserted", "#315f3c"],
         ] as const) {
-            expect(declarationOf(source, token), `${token} drifted from the fixed palette`).toBe(
-                value,
-            );
+            const normalized = declarationOf(source, token)
+                ?.replace(/\s+/g, " ")
+                .replace(/\(\s+/g, "(")
+                .replace(/\s+\)/g, ")");
+            expect(normalized, `${token} drifted from its theme contract`).toBe(value);
         }
     });
 
@@ -278,19 +292,21 @@ describe("diff-core palette", () => {
             "changed fragments underline again; the fill is the marker, and the surface this one mirrors draws no underline",
         ).toBeNull();
 
-        expect(declarationOf(viewerCss, "--diff-word-wash")).toBe("#4b1515");
-        expect(declarationOf(viewerCss, "--diff-modified-wash")).toBe("#3b2a32");
+        expect(declarationOf(viewerCss, "--diff-word-wash")).toBe(
+            "var(--vscode-diffEditor-removedTextBackground, transparent)",
+        );
+        expect(declarationOf(viewerCss, "--diff-modified-wash")).toBe("var(--diff-deleted-wash)");
     });
 
-    it("keeps the strong red word fill on the changed segment that owns it", () => {
+    it("does not override host word colors on generic changed segments", () => {
         const changed = stateRules(viewerCss).get(MARKER_CLASS) ?? "";
         const override = propertyIn(changed, "--diff-word-wash");
-        expect(override).toBe("#4b1515");
+        expect(override).toBeNull();
     });
 
-    it("keeps modified areas and word highlights red on both panes", () => {
+    it("uses directional host colors for modified areas and word highlights", () => {
         const modified = stateRules(viewerCss).get("diff-segment-modified") ?? "";
-        expect(hueIn(propertyIn(modified, "--diff-segment-hue"))).toBe("--diff-modified-wash");
+        expect(hueIn(propertyIn(modified, "--diff-segment-hue"))).toBe("--diff-info");
         expect(propertyIn(modified, "background")).toBe("var(--diff-modified-wash, transparent)");
 
         /** Returns the pane-specific modified-word rule body, failing if it is absent. */
@@ -308,13 +324,17 @@ describe("diff-core palette", () => {
         const left = paneRule("left");
         expect(propertyIn(left, "--diff-segment-hue")).toBeNull();
         expect(propertyIn(left, "--diff-modified-wash")).toBeNull();
-        expect(propertyIn(left, "--diff-word-wash")).toBe("#4b1515");
+        expect(propertyIn(left, "--diff-word-wash")).toBe(
+            "var(--vscode-diffEditor-removedTextBackground, transparent)",
+        );
         expect(propertyIn(left, "background")).toBeNull();
 
         const right = paneRule("right");
         expect(propertyIn(right, "--diff-segment-hue")).toBeNull();
-        expect(propertyIn(right, "--diff-modified-wash")).toBeNull();
-        expect(propertyIn(right, "--diff-word-wash")).toBe("#4b1515");
+        expect(propertyIn(right, "--diff-modified-wash")).toBe("var(--diff-inserted-wash)");
+        expect(propertyIn(right, "--diff-word-wash")).toBe(
+            "var(--vscode-diffEditor-insertedTextBackground, transparent)",
+        );
         expect(propertyIn(right, "background")).toBeNull();
     });
 
