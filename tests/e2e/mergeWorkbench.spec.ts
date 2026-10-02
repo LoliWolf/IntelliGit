@@ -140,7 +140,9 @@ test.describe("Full-document Git merge workbench", () => {
             await expect(frame.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
             await page.screenshot({ path: testInfo.outputPath("merge-light.png") });
             await frame.getByRole("button", { name: "Cancel", exact: true }).click();
-            await expect(frame.locator(".merge-workbench")).toBeHidden();
+            await expect(
+                page.getByRole("tab").filter({ hasText: "Merge: conflict.txt" }),
+            ).toHaveCount(0);
             // Cancel reveals the existing chooser; no redundant async command may reveal it later.
             frame = await openMerge(page, true);
             await expect.poll(() => result().innerText()).toBe(draft);
