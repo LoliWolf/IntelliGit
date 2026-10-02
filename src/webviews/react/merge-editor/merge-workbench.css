@@ -110,11 +110,11 @@
     inset: 0;
     pointer-events: none;
 }
-.mw-connectors path {
+.mw-connectors > svg path {
     fill: var(--vscode-diffEditor-removedLineBackground, #cc555522);
     stroke: var(--vscode-diffEditor-removedTextBorder, #cc555588);
 }
-.mw-connectors path.resolved {
+.mw-connectors > svg path.resolved {
     fill: var(--vscode-diffEditor-insertedLineBackground, #55aa6622);
     stroke: var(--vscode-diffEditor-insertedTextBorder, #55aa6688);
     stroke-dasharray: 3 3;
@@ -208,14 +208,14 @@
     border-bottom: 0;
     gap: 10px;
 }
-.mw-footer > span:first-child {
+.mw-footer > span:first-of-type {
     margin-right: auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.mw-footer > span:nth-child(2) {
+.mw-footer > span:nth-of-type(2) {
     color: var(--vscode-descriptionForeground);
     white-space: nowrap;
 }
@@ -239,7 +239,7 @@
     .mw-footer {
         flex-wrap: wrap;
     }
-    .mw-footer > span:first-child {
+    .mw-footer > span:first-of-type {
         width: 100%;
     }
 }

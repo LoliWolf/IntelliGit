@@ -79,6 +79,20 @@ afterEach(() => {
 });
 
 describe("merge workbench state and commands", () => {
+    it("opens the native fallback without dropping the current draft", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        click(mounted.container, "Accept left change");
+        const button = mounted.container.querySelector<HTMLButtonElement>(
+            '.mw-footer button[aria-label="Open in VS Code"]',
+        )!;
+        act(() => button.click());
+        expect(api.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "saveMergeDraft" }),
+        );
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "openNativeMerge" });
+        expect(result(mounted.container).state.doc.toString()).toBe(ours);
+        unmount(mounted.root, mounted.container);
+    });
     it("unifies side choices, manual editing and confirmations in undo/redo", () => {
         const mounted = mount(<MergeWorkbench data={data} />);
         const view = result(mounted.container);

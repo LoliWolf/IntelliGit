@@ -327,6 +327,16 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                 ))}
             </div>
             <footer className="mw-footer">
+                <button
+                    title={t("merge.workbench.native")}
+                    aria-label={t("merge.workbench.native")}
+                    onClick={() => {
+                        flushDraft();
+                        getVsCodeApi<OutboundMessage>().postMessage({ type: "openNativeMerge" });
+                    }}
+                >
+                    <VscEye />
+                </button>
                 <span>{data.filePath}</span>
                 <span>{saved ? t("merge.workbench.draftSaved") : ""}</span>
                 <button
