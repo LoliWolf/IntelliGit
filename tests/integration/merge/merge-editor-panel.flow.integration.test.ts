@@ -208,6 +208,16 @@ function lastPanel(): CapturedPanel {
 
 async function fireMessage(panel: CapturedPanel, msg: unknown): Promise<void> {
     if (!panel.messageHandler) throw new Error("Webview message handler was not registered");
+    if (
+        typeof msg === "object" &&
+        msg !== null &&
+        "type" in msg &&
+        msg.type === "applyResolution" &&
+        !("snapshotId" in msg)
+    ) {
+        const data = findConflictData(panel);
+        msg = { ...msg, snapshotId: data.workbench?.snapshotId };
+    }
     await panel.messageHandler(msg);
 }
 
@@ -249,6 +259,81 @@ afterEach(async () => {
 });
 
 describe("MergeEditorPanel end-to-end merge flow", () => {
+    it("persists drafts in message order and clears them after Apply without late recreation", async () => {
+        await createConflictRepo();
+        const values = new Map<string, unknown>();
+        const store = {
+            get: (key: string) => values.get(key),
+            update: async (key: string, value: unknown) => {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                values.set(key, value);
+            },
+        };
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), { draftStore: store as never }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const snapshotId = findConflictData(panel).workbench!.snapshotId;
+        const first = { snapshotId, content: "first", hunks: [] };
+        const second = { snapshotId, content: "second", hunks: [] };
+        await Promise.all([
+            fireMessage(panel, { type: "saveMergeDraft", draft: first, revision: 1 }),
+            fireMessage(panel, { type: "saveMergeDraft", draft: second, revision: 2 }),
+        ]);
+        expect([...values.values()]).toEqual([second]);
+        await fireMessage(panel, { type: "applyResolution", content: "resolved\n" });
+        await fireMessage(panel, { type: "saveMergeDraft", draft: first, revision: 3 });
+        expect([...values.values()]).toEqual([undefined]);
+    });
+
+    it("does not overwrite or discard an older operation draft without its identity", async () => {
+        await createConflictRepo();
+        const old = { snapshotId: "a".repeat(64), content: "previous operation", hunks: [] };
+        let value: unknown = old;
+        const store = {
+            get: () => value,
+            update: async (_key: string, next: unknown) => {
+                value = next;
+            },
+        };
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), { draftStore: store as never }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const snapshotId = findConflictData(panel).workbench!.snapshotId;
+        await fireMessage(panel, {
+            type: "saveMergeDraft",
+            draft: { snapshotId, content: "new", hunks: [] },
+            revision: 1,
+        });
+        await fireMessage(panel, { type: "discardMergeDraft", snapshotId });
+        expect(value).toEqual(old);
+        await fireMessage(panel, { type: "discardMergeDraft", snapshotId: old.snapshotId });
+        expect(value).toBeUndefined();
+    });
+
+    it("keeps a failed Apply mounted and offers a root-scoped native fallback", async () => {
+        await createConflictRepo();
+        await MergeEditorPanel.open(makeOptions(new GitOps(new GitExecutor(repoRoot))));
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        await writeRepoFile("shared.ts", "external\n");
+        await fireMessage(panel, { type: "applyResolution", content: "draft\n" });
+        expect(panel.disposed).toBe(false);
+        expect(panel.postedMessages).toContainEqual({
+            type: "resolutionError",
+            message: expect.stringContaining("changed"),
+        });
+        expect(await fs.readFile(path.join(repoRoot, "shared.ts"), "utf8")).toBe("external\n");
+        await fireMessage(panel, { type: "openNativeMerge" });
+        expect(mocks.executeCommand).toHaveBeenCalledWith(
+            "git.openMergeEditor",
+            expect.objectContaining({ fsPath: path.join(repoRoot, "shared.ts") }),
+        );
+    });
+
     it("opens its captured conflict session instead of consulting the active repository", async () => {
         await createConflictRepo();
         const onOpenConflictSession = vi.fn(async () => undefined);
@@ -279,6 +364,7 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
             const bBefore = await fs.readFile(path.join(b, "shared.ts"), "utf8");
             await MergeEditorPanel.open(makeOptions(gitOps));
             const panelB = lastPanel();
+            await fireMessage(panelB, { type: "ready" });
             expect(
                 panelB,
                 "same relative path in another repository gets an independent editor",
@@ -460,7 +546,7 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         expect(mocks.showInformationMessage).toHaveBeenCalledWith("Merge aborted.");
     });
 
-    it("re-parses with whitespace ignoring when the webview switches ignore mode", async () => {
+    it("does not reseed a live workbench for legacy ignore-mode or repeated ready messages", async () => {
         initRepo();
         await writeRepoFile("config.ts", "const value = 1;\n");
         git(["add", "."]);
@@ -483,14 +569,16 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         expect(strict.segments.some((seg) => seg.type === "conflict")).toBe(true);
 
         await fireMessage(panel, { type: "setIgnoreMode", mode: "whitespace" });
-        const relaxed = findConflictData(panel);
-        expect(relaxed.diffOptions?.ignoreWhitespace).toBe(true);
-        // With whitespace ignored, main's reformat no longer counts as an "ours"
-        // edit, so no segment should be a both-sides conflict anymore.
-        const trueConflicts = conflictSegments(relaxed).filter(
-            (seg) => seg.changeKind === "conflict",
-        );
-        expect(trueConflicts).toHaveLength(0);
+        expect(findConflictData(panel)).toEqual(strict);
+        await writeRepoFile("config.ts", "external\n");
+        await fireMessage(panel, { type: "ready" });
+        expect(findConflictData(panel)).toEqual(strict);
+        await fireMessage(panel, { type: "applyResolution", content: "draft\n" });
+        expect(await fs.readFile(path.join(repoRoot, "config.ts"), "utf8")).toBe("external\n");
+        expect(panel.postedMessages).toContainEqual({
+            type: "resolutionError",
+            message: expect.stringContaining("changed"),
+        });
     });
 
     it("reports a load error instead of opening an empty editor for non-conflicted files", async () => {
@@ -506,7 +594,7 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
 
         expect(panel.postedMessages).toContainEqual({
             type: "loadError",
-            message: "File is not in a conflicted state: clean.ts",
+            message: "The file is no longer conflicted. Reopen the conflict list.",
         });
     });
 
@@ -540,7 +628,7 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         expect(git(["ls-files", "-u"]).trim()).not.toBe("");
     });
 
-    it("reveals and refreshes the existing panel when the same file opens twice", async () => {
+    it("reveals the existing panel without reseeding its unsubmitted result", async () => {
         await createConflictRepo();
         const gitOps = new GitOps(new GitExecutor(repoRoot));
 
@@ -551,10 +639,10 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         await MergeEditorPanel.open(makeOptions(gitOps));
         expect(mocks.capturedPanels).toHaveLength(1);
         expect(panel.revealCalls).toBe(1);
-        // Reopening posts fresh conflict data without waiting for another "ready".
+        // Reopening must keep the current immutable session and its editing history.
         const dataMessages = panel.postedMessages.filter(
             (msg) => (msg as { type?: unknown }).type === "setConflictData",
         );
-        expect(dataMessages.length).toBeGreaterThanOrEqual(2);
+        expect(dataMessages.length).toBe(1);
     });
 });

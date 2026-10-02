@@ -838,5 +838,6 @@
     "Pull could not start: {message}": "Der Pull konnte nicht gestartet werden: {message}",
     "Pull finished, but the view could not refresh: {message}": "Der Pull ist beendet, aber die Ansicht konnte nicht aktualisiert werden: {message}",
     "The conflict view could not open: {message}": "Die Konfliktansicht konnte nicht geöffnet werden: {message}",
-    "The requested repository is no longer available. Select it again before opening conflicts.": "Das angeforderte Repository ist nicht mehr verfügbar. Wählen Sie es erneut aus, bevor Sie Konflikte öffnen."
+    "The requested repository is no longer available. Select it again before opening conflicts.": "Das angeforderte Repository ist nicht mehr verfügbar. Wählen Sie es erneut aus, bevor Sie Konflikte öffnen.",
+    "The conflict session changed. Reopen the merge editor before applying.": "Die Konfliktsitzung hat sich geändert. Öffnen Sie den Merge-Editor vor dem Anwenden erneut."
 }

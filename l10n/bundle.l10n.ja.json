@@ -838,5 +838,6 @@
     "Pull could not start: {message}": "プルを開始できませんでした: {message}",
     "Pull finished, but the view could not refresh: {message}": "プルは終了しましたが、ビューを更新できませんでした: {message}",
     "The conflict view could not open: {message}": "競合ビューを開けませんでした: {message}",
-    "The requested repository is no longer available. Select it again before opening conflicts.": "要求されたリポジトリは利用できなくなりました。競合を開く前に、もう一度選択してください。"
+    "The requested repository is no longer available. Select it again before opening conflicts.": "要求されたリポジトリは利用できなくなりました。競合を開く前に、もう一度選択してください。",
+    "The conflict session changed. Reopen the merge editor before applying.": "競合セッションが変更されました。適用する前にマージエディターを開き直してください。"
 }

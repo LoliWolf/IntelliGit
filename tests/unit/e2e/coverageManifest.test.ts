@@ -52,6 +52,7 @@ const OUTBOUND_UNION_DECLARATIONS = [
     "src/webviews/protocol/diffViewerTypes.ts:OutboundMessage",
     "src/webviews/protocol/fileHistory.ts:HistoryOutbound",
     "src/webviews/protocol/mergeConflictSessionTypes.ts:OutboundMessage",
+    "src/webviews/protocol/mergeWorkbench.ts:MergeWorkbenchOutbound",
     "src/webviews/protocol/syntaxTheme.ts:SyntaxThemeOutbound",
     "src/webviews/protocol/undockedMessages.ts:GraphOutbound",
     "src/webviews/protocol/undockedMessages.ts:UndockedCommitPanelOutbound",

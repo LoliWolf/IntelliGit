@@ -838,5 +838,6 @@
     "Pull could not start: {message}": "Le tirage n’a pas pu démarrer : {message}",
     "Pull finished, but the view could not refresh: {message}": "Le tirage est terminé, mais la vue n’a pas pu être actualisée : {message}",
     "The conflict view could not open: {message}": "La vue des conflits n’a pas pu être ouverte : {message}",
-    "The requested repository is no longer available. Select it again before opening conflicts.": "Le dépôt demandé n’est plus disponible. Sélectionnez-le à nouveau avant d’ouvrir les conflits."
+    "The requested repository is no longer available. Select it again before opening conflicts.": "Le dépôt demandé n’est plus disponible. Sélectionnez-le à nouveau avant d’ouvrir les conflits.",
+    "The conflict session changed. Reopen the merge editor before applying.": "La session de conflit a changé. Rouvrez l’éditeur de fusion avant d’appliquer."
 }

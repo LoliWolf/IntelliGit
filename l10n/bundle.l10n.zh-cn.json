@@ -838,5 +838,6 @@
     "Pull could not start: {message}": "无法开始拉取：{message}",
     "Pull finished, but the view could not refresh: {message}": "拉取已结束，但无法刷新视图：{message}",
     "The conflict view could not open: {message}": "无法打开冲突视图：{message}",
-    "The requested repository is no longer available. Select it again before opening conflicts.": "请求的仓库已不可用。打开冲突前请重新选择该仓库。"
+    "The requested repository is no longer available. Select it again before opening conflicts.": "请求的仓库已不可用。打开冲突前请重新选择该仓库。",
+    "The conflict session changed. Reopen the merge editor before applying.": "冲突会话已改变。请重新打开合并编辑器后再应用。"
 }
