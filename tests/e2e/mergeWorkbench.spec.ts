@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { FrameLocator, Page } from "@playwright/test";
 import { expect, test } from "./fixtureWorkspace";
@@ -38,6 +38,41 @@ async function acceptOurs(frame: FrameLocator): Promise<void> {
 
 test.describe("Full-document Git merge workbench", () => {
     test.use({ scenario: "conflicted" });
+    test("stages a cherry-pick resolution without automatically continuing it", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        await runGit(workspace.root, ["merge", "--abort"], workspace.env);
+        await runGit(workspace.root, ["cherry-pick", "conflict/with-main"], workspace.env).catch(
+            () => undefined,
+        );
+        expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).not.toBe("");
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const frame = await openMerge(page);
+            await acceptOurs(frame);
+            await frame.getByRole("button", { name: "Apply", exact: true }).click();
+            await expect
+                .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
+                .toBe("");
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect(
+                await runGit(workspace.root, ["rev-parse", "CHERRY_PICK_HEAD"], workspace.env),
+            ).not.toBe("");
+        } finally {
+            await app.close();
+        }
+    });
     test("keeps typing, decisions, history and durable drafts through theme changes and reopen", async ({
         fixtureWorkspace,
     }, testInfo) => {
@@ -144,6 +179,157 @@ test.describe("Full-document Git merge workbench", () => {
                 "external change\n",
             );
             expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).not.toBe("");
+        } finally {
+            await app.close();
+        }
+    });
+
+    test("preserves multiple unequal changes, scroll and syntax through high-contrast switches", async ({
+        fixtureWorkspace,
+    }, testInfo) => {
+        const { workspace } = fixtureWorkspace;
+        await runGit(workspace.root, ["merge", "--abort"], workspace.env);
+        const file = "merge-theme.ts";
+        const filePath = path.join(workspace.root, file);
+        const base =
+            Array.from({ length: 100 }, (_, index) => `const item${index} = "base"; // theme`).join(
+                "\n",
+            ) + "\n";
+        await writeFile(filePath, base);
+        await runGit(workspace.root, ["add", "--", file], workspace.env);
+        await runGit(workspace.root, ["commit", "-m", "Merge theme base"], workspace.env);
+        const branch = (
+            await runGit(workspace.root, ["branch", "--show-current"], workspace.env)
+        ).trim();
+        await runGit(workspace.root, ["checkout", "-b", "merge-theme-incoming"], workspace.env);
+        const change = (text: string, side: string) =>
+            [5, 45, 85].reduce(
+                (value, index) =>
+                    value.replace(`item${index} = "base"`, `item${index} = "${side}"`),
+                text,
+            );
+        await writeFile(filePath, change(base, "theirs"));
+        await runGit(workspace.root, ["commit", "-am", "Incoming changes"], workspace.env);
+        await runGit(workspace.root, ["checkout", branch], workspace.env);
+        await writeFile(
+            filePath,
+            change(base, "ours").replace(
+                "// theme\nconst item6",
+                '// theme\nconst extra = "ours";\nconst item6',
+            ),
+        );
+        await runGit(workspace.root, ["commit", "-am", "Local changes"], workspace.env);
+        await runGit(workspace.root, ["merge", "merge-theme-incoming"], workspace.env).catch(
+            () => undefined,
+        );
+        expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).toContain(file);
+        const settingsPath = path.join(workspace.root, ".vscode/settings.json");
+        await mkdir(path.dirname(settingsPath), { recursive: true });
+        const settings = {
+            "editor.tokenColorCustomizations": {
+                textMateRules: [
+                    { scope: "comment", settings: { foreground: "#33bb77", fontStyle: "italic" } },
+                ],
+            },
+            "workbench.colorCustomizations": { "diffEditor.removedTextBorder": "#eeaa11" },
+        };
+        await writeFile(
+            settingsPath,
+            JSON.stringify({ ...settings, "workbench.colorTheme": "Default Dark Modern" }),
+        );
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const frame = await openMerge(page);
+            await expect(frame.locator(".mw-hunks button")).toHaveCount(3);
+            const result = frame.locator('[data-testid="merge-editor-1"] .cm-content');
+            await frame
+                .getByRole("combobox", { name: "Resolve change" })
+                .selectOption("both-reversed");
+            await expect(result).toContainText('item5 = "theirs"');
+            await expect(result).toContainText('item5 = "ours"');
+            const sourceScroll = frame.locator('[data-testid="merge-editor-0"] .cm-scroller');
+            const resultScroll = frame.locator('[data-testid="merge-editor-1"] .cm-scroller');
+            await sourceScroll.evaluate((element) => {
+                element.scrollTop = 600;
+            });
+            await expect
+                .poll(() => resultScroll.evaluate((element) => element.scrollTop))
+                .toBeGreaterThan(300);
+            const scroll = await resultScroll.evaluate((element) => element.scrollTop);
+            const draft = await result.innerText();
+            const comment = frame
+                .locator('[data-testid="merge-editor-1"] span[style*="color"]')
+                .filter({ hasText: /^\/\/ theme$/ })
+                .first();
+            await expect(comment).toHaveCSS("color", "rgb(51, 187, 119)");
+            await expect(comment).toHaveCSS("font-style", "italic");
+            for (const [theme, kind] of [
+                ["Default High Contrast", "vscode-high-contrast"],
+                ["Default High Contrast Light", "vscode-high-contrast-light"],
+            ]) {
+                await writeFile(
+                    settingsPath,
+                    JSON.stringify({ ...settings, "workbench.colorTheme": theme }),
+                );
+                await expect(frame.locator("body")).toHaveAttribute("data-vscode-theme-kind", kind);
+                await expect(comment).toHaveCSS("color", "rgb(51, 187, 119)");
+                await expect(frame.locator(".merge-word-change").first()).toHaveCSS(
+                    "outline-color",
+                    "rgb(238, 170, 17)",
+                );
+                expect(await resultScroll.evaluate((element) => element.scrollTop)).toBe(scroll);
+                expect(await result.innerText()).toBe(draft);
+                await expect(
+                    frame.getByRole("button", { name: "Undo", exact: true }),
+                ).toBeEnabled();
+                await page.screenshot({ path: testInfo.outputPath(`${kind}.png`) });
+            }
+            await frame.getByRole("button", { name: "Find in result" }).click();
+            await expect(frame.locator(".cm-search")).toBeVisible();
+        } finally {
+            await app.close();
+        }
+    });
+});
+
+test.describe("Rebase conflict workbench", () => {
+    test.use({ scenario: "mid-rebase" });
+    test("resolves index stages without committing or continuing the rebase", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const frame = await openMerge(page);
+            await expect(frame.locator(".mw-headings")).toContainText("Result");
+            await acceptOurs(frame);
+            await frame.getByRole("button", { name: "Apply", exact: true }).click();
+            await expect
+                .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
+                .toBe("");
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect((await stat(path.join(workspace.root, ".git/rebase-merge"))).isDirectory()).toBe(
+                true,
+            );
         } finally {
             await app.close();
         }

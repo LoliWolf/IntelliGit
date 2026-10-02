@@ -233,10 +233,12 @@ export class MergeEditorPanel {
                     );
                 const content = msg.content;
                 if (typeof content !== "string") {
-                    throw new Error("Merge result payload must be a string.");
+                    throw new Error(vscode.l10n.t("Merge result payload must be a string."));
                 }
                 if (content.length > MAX_APPLY_CONTENT_BYTES) {
-                    throw new Error("Merge result payload exceeds the supported size.");
+                    throw new Error(
+                        vscode.l10n.t("Merge result payload exceeds the supported size."),
+                    );
                 }
                 await this.applyResolvedContent(content);
                 return;
@@ -290,7 +292,8 @@ export class MergeEditorPanel {
     private async applyResolvedContent(content: string): Promise<void> {
         if (this.applying) return;
         const snapshot = this.snapshot;
-        if (!snapshot) throw new Error("Load the conflict before applying a resolution.");
+        if (!snapshot)
+            throw new Error(vscode.l10n.t("Load the conflict before applying a resolution."));
         this.applying = true;
         try {
             await runWithNotificationProgress(
@@ -304,7 +307,9 @@ export class MergeEditorPanel {
                             )
                         ) {
                             throw new Error(
-                                "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.",
+                                vscode.l10n.t(
+                                    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.",
+                                ),
                             );
                         }
                     });
