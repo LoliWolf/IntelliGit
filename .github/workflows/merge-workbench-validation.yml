@@ -44,12 +44,12 @@ jobs:
             - name: Real Linux VS Code full workflows and Diff regression
               if: always()
               run: >-
-                  ./tests/e2e/docker/run.sh 'xvfb-run -a bun run test:e2e --output=merge-e2e-results &&
-                  xvfb-run -a bun run test:e2e:diff-viewer --output=diff-e2e-results'
+                  ./tests/e2e/docker/run.sh 'xvfb-run -a bun run test:e2e --output=test-results/e2e &&
+                  xvfb-run -a bun run test:e2e:diff-viewer --output=test-results/diff-e2e'
             - name: Installed production package merge smoke
               if: always()
               run: >-
-                  ./tests/e2e/docker/run.sh 'bun run package && xvfb-run -a bun run test:package-smoke --output=package-smoke-results'
+                  ./tests/e2e/docker/run.sh 'bun run package && xvfb-run -a bun run test:package-smoke --output=test-results/package-smoke'
             - name: Export baseline changes and diagnostics
               if: always()
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -60,7 +60,4 @@ jobs:
                       tests/visual/fixtures/knownLocaleFindings.json
                       tests/visual/__screenshots__/pixelBaselines.spec.ts/*merge-editor*.png
                       test-results/
-                      merge-e2e-results/
-                      diff-e2e-results/
-                      package-smoke-results/
                   retention-days: 3
