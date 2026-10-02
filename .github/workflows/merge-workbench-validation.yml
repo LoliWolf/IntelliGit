@@ -41,12 +41,15 @@ jobs:
                   --grep "merge-editor" --update-snapshots'
             - name: Compare the complete visual matrix without update mode
               run: ./tests/e2e/docker/run.sh 'bun run test:visual'
-            - name: Real Linux VS Code merge and diff workflows
+            - name: Real Linux VS Code full workflows and Diff regression
               if: always()
               run: >-
-                  ./tests/e2e/docker/run.sh 'xvfb-run -a bun playwright test --config playwright.e2e.config.ts
-                  --project=e2e tests/e2e/mergeWorkbench.spec.ts tests/e2e/diffViewerTheme.spec.ts
-                  --output=merge-e2e-results'
+                  ./tests/e2e/docker/run.sh 'xvfb-run -a bun run test:e2e --output=merge-e2e-results &&
+                  xvfb-run -a bun run test:e2e:diff-viewer --output=diff-e2e-results'
+            - name: Installed production package merge smoke
+              if: always()
+              run: >-
+                  ./tests/e2e/docker/run.sh 'bun run package && xvfb-run -a bun run test:package-smoke --output=package-smoke-results'
             - name: Export baseline changes and diagnostics
               if: always()
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -58,4 +61,6 @@ jobs:
                       tests/visual/__screenshots__/pixelBaselines.spec.ts/merge-editor-*.png
                       test-results/
                       merge-e2e-results/
+                      diff-e2e-results/
+                      package-smoke-results/
                   retention-days: 3
