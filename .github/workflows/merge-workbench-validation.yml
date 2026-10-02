@@ -58,7 +58,7 @@ jobs:
                   path: |
                       tests/visual/fixtures/knownFindings.json
                       tests/visual/fixtures/knownLocaleFindings.json
-                      tests/visual/__screenshots__/pixelBaselines.spec.ts/merge-editor-*.png
+                      tests/visual/__screenshots__/pixelBaselines.spec.ts/*merge-editor*.png
                       test-results/
                       merge-e2e-results/
                       diff-e2e-results/
