@@ -32,13 +32,9 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
               with:
                   persist-credentials: false
-            - name: Update only replaced merge baselines in the digest-pinned renderer
+            - name: Build the committed final baselines in the digest-pinned renderer
               run: >-
-                  ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build &&
-                  UPDATE_VISUAL_BASELINE=1 bun playwright test --config playwright.visual.config.ts
-                  tests/visual/nonPixelOracles.spec.ts tests/visual/localeSweep.spec.ts --grep "merge-editor" &&
-                  bun playwright test --config playwright.visual.config.ts tests/visual/pixelBaselines.spec.ts
-                  --grep "merge-editor" --update-snapshots'
+                  ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build'
             - name: Compare the complete visual matrix without update mode
               run: ./tests/e2e/docker/run.sh 'bun run test:visual'
             - name: Real Linux VS Code full workflows and Diff regression
