@@ -190,6 +190,51 @@ test.describe("Full-document Git merge workbench", () => {
         }
     });
 
+    test("refuses Apply over unsaved native editor changes", async ({ fixtureWorkspace }) => {
+        const { workspace } = fixtureWorkspace;
+        const settingsPath = path.join(workspace.root, ".vscode/settings.json");
+        await mkdir(path.dirname(settingsPath), { recursive: true });
+        await writeFile(settingsPath, JSON.stringify({ "git.mergeEditor": false }));
+        const before = await readFile(path.join(workspace.root, "conflict.txt"), "utf8");
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            let frame = await openMerge(page);
+            await acceptOurs(frame);
+            const modifier = process.platform === "darwin" ? "Meta" : "Control";
+            await page.keyboard.press(`${modifier}+P`);
+            const input = page.locator(".quick-input-widget .quick-input-box input").first();
+            await expect(input).toBeVisible();
+            await input.fill(path.join(workspace.root, "conflict.txt"));
+            await page.getByRole("option").filter({ hasText: "conflict.txt" }).first().click();
+            await expect(input).toBeHidden();
+            const editor = page.locator(".editor-group-container .monaco-editor:visible").first();
+            await editor.click();
+            await page.keyboard.press(`${modifier}+A`);
+            await page.keyboard.type("unsaved native edit");
+            await expect(editor.locator(".view-lines")).toContainText("unsaved native edit");
+            await page.getByRole("tab").filter({ hasText: "Merge: conflict.txt" }).click();
+            frame = await new IntelliGitView(page).revealMergeWorkbench();
+            await frame.getByRole("button", { name: "Apply", exact: true }).click();
+            await expect(frame.locator(".mw-error")).toContainText("unsaved editor changes");
+            expect(await readFile(path.join(workspace.root, "conflict.txt"), "utf8")).toBe(before);
+            expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).not.toBe("");
+            await expect(
+                frame.locator('[data-testid="merge-editor-1"] .cm-content'),
+            ).toHaveAttribute("contenteditable", "true");
+        } finally {
+            await app.close();
+        }
+    });
+
     test("preserves multiple unequal changes, scroll and syntax through high-contrast switches", async ({
         fixtureWorkspace,
     }, testInfo) => {

@@ -76,7 +76,8 @@ describe("immutable merge resolutions", () => {
         const snapshot = await readMergeResolutionSnapshot(executor, root, "file.ts");
         const before = await readFile(path.join(root, "file.ts"));
         await expect(
-            applyMergeResolution(executor, root, "file.ts", snapshot, "draft", () => {
+            applyMergeResolution(executor, root, "file.ts", snapshot, "draft", async () => {
+                await Promise.resolve();
                 throw new Error("dirty");
             }),
         ).rejects.toThrow("dirty");
