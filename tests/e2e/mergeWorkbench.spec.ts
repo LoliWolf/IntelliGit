@@ -20,8 +20,11 @@ async function openMerge(page: Page): Promise<FrameLocator> {
     await new Workbench(page).runCommand("Open Conflict Session");
     const session = await view.revealConflictSession();
     await expect(session.locator("tbody tr.row")).toHaveCount(1);
-    await session.locator("tbody tr.row").dblclick();
-    return view.revealMergeWorkbench();
+    // Rows open on one click; a double click can land its second click on the revealed tab.
+    await session.locator("tbody tr.row").click();
+    const frame = await view.revealMergeWorkbench();
+    await expect(frame.locator(".merge-workbench")).toBeVisible();
+    return frame;
 }
 
 /** Resolves each original change through visible per-change navigation and side decisions. */
@@ -136,6 +139,7 @@ test.describe("Full-document Git merge workbench", () => {
             await expect(frame.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
             await page.screenshot({ path: testInfo.outputPath("merge-light.png") });
             await frame.getByRole("button", { name: "Cancel", exact: true }).click();
+            await expect(frame.locator(".merge-workbench")).toBeHidden();
             frame = await openMerge(page);
             await expect.poll(() => result().innerText()).toBe(draft);
             await acceptOurs(frame);

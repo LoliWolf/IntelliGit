@@ -240,7 +240,7 @@ test.describe("installed VSIX package smoke", () => {
             await new Workbench(window).runCommand("Open Conflict Session");
             const conflicts = await intelliGitView.revealConflictSession();
             await expect(conflicts.locator("tbody tr.row")).toHaveCount(1);
-            await conflicts.locator("tbody tr.row").dblclick();
+            await conflicts.locator("tbody tr.row").click();
             const merge = await intelliGitView.revealMergeWorkbench();
             await expect(
                 merge.locator('[data-testid="merge-editor-1"] .cm-content'),
