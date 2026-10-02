@@ -15,10 +15,11 @@ import { Workbench } from "./pageObjects/workbench";
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 /** Opens the real command and row rather than injecting merge payloads. */
-async function openMerge(page: Page): Promise<FrameLocator> {
+async function openMerge(page: Page, reuseVisibleSession = false): Promise<FrameLocator> {
     const view = new IntelliGitView(page);
-    await new Workbench(page).runCommand("Open Conflict Session");
+    if (!reuseVisibleSession) await new Workbench(page).runCommand("Open Conflict Session");
     const session = await view.revealConflictSession();
+    await expect(session.locator(".session-root")).toBeVisible();
     await expect(session.locator("tbody tr.row")).toHaveCount(1);
     // Rows open on one click; a double click can land its second click on the revealed tab.
     await session.locator("tbody tr.row").click();
@@ -140,7 +141,8 @@ test.describe("Full-document Git merge workbench", () => {
             await page.screenshot({ path: testInfo.outputPath("merge-light.png") });
             await frame.getByRole("button", { name: "Cancel", exact: true }).click();
             await expect(frame.locator(".merge-workbench")).toBeHidden();
-            frame = await openMerge(page);
+            // Cancel reveals the existing chooser; no redundant async command may reveal it later.
+            frame = await openMerge(page, true);
             await expect.poll(() => result().innerText()).toBe(draft);
             await acceptOurs(frame);
             await frame.getByRole("button", { name: "Apply", exact: true }).click();
