@@ -6,6 +6,8 @@ import { parseMergeDraft } from "../webviews/protocol/mergeWorkbench";
 import * as path from "path";
 import * as vscode from "vscode";
 import { createHash } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import { areSameRepositoryRoot } from "../utils/repositoryRoot";
 import type { MergeResolutionSnapshot } from "../git/mergeResolution";
 import { DiffSyntaxThemeService } from "./shared/DiffSyntaxThemeService";
 import { captureWebview } from "../e2e/webviewCapture";
@@ -299,20 +301,9 @@ export class MergeEditorPanel {
             await runWithNotificationProgress(
                 vscode.l10n.t("Applying merge result for {path}...", { path: this.safePath }),
                 async () => {
-                    await this.gitOps.applyMergeResolution(this.safePath, snapshot, content, () => {
-                        const target = path.join(this.repoRoot, this.safePath);
-                        if (
-                            vscode.workspace.textDocuments?.some(
-                                (document) => document.uri.fsPath === target && document.isDirty,
-                            )
-                        ) {
-                            throw new Error(
-                                vscode.l10n.t(
-                                    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.",
-                                ),
-                            );
-                        }
-                    });
+                    await this.gitOps.applyMergeResolution(this.safePath, snapshot, content, () =>
+                        this.assertNoDirtyEditor(),
+                    );
                 },
             );
             this.applied = true;
@@ -329,6 +320,24 @@ export class MergeEditorPanel {
             if (this.isAlive()) this.panel.dispose();
         } finally {
             this.applying = false;
+        }
+    }
+
+    /** Refuses dirty buffers even when the workspace spells the same path through an alias. */
+    private async assertNoDirtyEditor(): Promise<void> {
+        const target = await realpath(path.join(this.repoRoot, this.safePath));
+        const documents = vscode.workspace.textDocuments ?? [];
+        for (const document of documents) {
+            if (!document.isDirty || document.uri.scheme !== "file") continue;
+            // Workspace aliases (including macOS /var) must not bypass unsaved-buffer protection.
+            const candidate = await realpath(document.uri.fsPath).catch(() => document.uri.fsPath);
+            if (document.isDirty && areSameRepositoryRoot(target, candidate)) {
+                throw new Error(
+                    vscode.l10n.t(
+                        "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.",
+                    ),
+                );
+            }
         }
     }
 

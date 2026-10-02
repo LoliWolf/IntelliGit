@@ -1921,7 +1921,7 @@ export class GitOps {
         filePath: string,
         snapshot: MergeResolutionSnapshot,
         content: string,
-        assertNoDirtyEditor: () => void,
+        assertNoDirtyEditor: () => void | Promise<void>,
     ): Promise<void> {
         await applyMergeResolution(
             this.executor,

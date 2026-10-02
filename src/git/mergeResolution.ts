@@ -172,7 +172,7 @@ export async function applyMergeResolution(
     filePath: string,
     snapshot: MergeResolutionSnapshot,
     content: string,
-    assertNoDirtyEditor: () => void,
+    assertNoDirtyEditor: () => void | Promise<void>,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(filePath);
     if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES || content.includes("\0")) {
@@ -184,16 +184,16 @@ export async function applyMergeResolution(
         );
     }
     await executor.runWithinMutationGate(async (run) => {
-        assertNoDirtyEditor();
+        await assertNoDirtyEditor();
         const current = await readMergeResolutionSnapshot(executor, root, safePath);
         if (current.id !== snapshot.id) {
             throw mergeError(
                 "Git stages or the working file changed. Your draft is retained; reopen the merge editor before applying.",
             );
         }
-        assertNoDirtyEditor();
+        await assertNoDirtyEditor();
         await replaceMergeWorktreeFile(root, safePath, Buffer.from(content, "utf8"), async () => {
-            assertNoDirtyEditor();
+            await assertNoDirtyEditor();
             if ((await readMergeResolutionSnapshot(executor, root, safePath)).id !== snapshot.id) {
                 throw mergeError(
                     "The conflict changed before saving. Your draft is retained; reopen the merge editor.",
@@ -215,7 +215,7 @@ export async function applyMergeResolution(
                 "The file changed during the write. It was not staged; your draft is retained.",
             );
         }
-        assertNoDirtyEditor();
+        await assertNoDirtyEditor();
         try {
             await run(withLiteralPathspecs(["add", "--", safePath]));
         } catch {

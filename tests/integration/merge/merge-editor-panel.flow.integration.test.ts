@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
         showErrorMessage: vi.fn(async () => undefined),
         showWarningMessage: vi.fn(async () => undefined),
         executeCommand: vi.fn(async () => undefined),
+        textDocuments: [] as Array<{ uri: { scheme: string; fsPath: string }; isDirty: boolean }>,
     };
 });
 
@@ -62,6 +63,7 @@ vi.mock("vscode", () => {
         },
         env: { language: "en" },
         workspace: {
+            textDocuments: mocks.textDocuments,
             getConfiguration: () => ({ get: () => undefined }),
         },
         window: {
@@ -245,6 +247,7 @@ function conflictSegments(data: MergeEditorData): ConflictSegment[] {
 beforeEach(async () => {
     repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-merge-editor-"));
     mocks.capturedPanels.length = 0;
+    mocks.textDocuments.length = 0;
     vi.clearAllMocks();
 });
 
@@ -259,6 +262,27 @@ afterEach(async () => {
 });
 
 describe("MergeEditorPanel end-to-end merge flow", () => {
+    it("refuses a dirty buffer opened through a symlinked workspace alias", async () => {
+        await createConflictRepo();
+        const alias = path.join(repoRoot, "workspace-alias");
+        await fs.symlink(repoRoot, alias, process.platform === "win32" ? "junction" : "dir");
+        mocks.textDocuments.push({
+            uri: { scheme: "file", fsPath: path.join(alias, "shared.ts") },
+            isDirty: true,
+        });
+        await MergeEditorPanel.open(makeOptions(new GitOps(new GitExecutor(repoRoot))));
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const before = await fs.readFile(path.join(repoRoot, "shared.ts"));
+        await fireMessage(panel, { type: "applyResolution", content: "resolved\n" });
+        expect(panel.disposed).toBe(false);
+        expect(panel.postedMessages).toContainEqual({
+            type: "resolutionError",
+            message: expect.stringContaining("unsaved editor changes"),
+        });
+        expect(await fs.readFile(path.join(repoRoot, "shared.ts"))).toEqual(before);
+        expect(git(["ls-files", "-u"])).not.toBe("");
+    });
     it("persists drafts in message order and clears them after Apply without late recreation", async () => {
         await createConflictRepo();
         const values = new Map<string, unknown>();
