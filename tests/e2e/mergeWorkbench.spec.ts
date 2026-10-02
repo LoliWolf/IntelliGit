@@ -139,13 +139,20 @@ test.describe("Full-document Git merge workbench", () => {
             await expect.poll(() => result().innerText()).toBe(draft);
             await expect(frame.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
             await page.screenshot({ path: testInfo.outputPath("merge-light.png") });
+            // Close immediately after typing; the 250 ms draft timer must not lose this edit.
+            await result().click();
+            await result().press("Control+End");
+            await result().press("End");
+            await result().press("Enter");
+            await result().pressSequentially("last-second draft");
+            const finalDraft = await result().innerText();
             await frame.getByRole("button", { name: "Cancel", exact: true }).click();
             await expect(
                 page.getByRole("tab").filter({ hasText: "Merge: conflict.txt" }),
             ).toHaveCount(0);
             // Cancel reveals the existing chooser; no redundant async command may reveal it later.
             frame = await openMerge(page, true);
-            await expect.poll(() => result().innerText()).toBe(draft);
+            await expect.poll(() => result().innerText()).toBe(finalDraft);
             await acceptOurs(frame);
             await frame.getByRole("button", { name: "Apply", exact: true }).click();
             await expect

@@ -72,6 +72,7 @@ beforeEach(() => {
     });
 });
 afterEach(() => {
+    vi.useRealTimers();
     Reflect.deleteProperty(Range.prototype, "getClientRects");
     Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
     vi.restoreAllMocks();
@@ -79,6 +80,78 @@ afterEach(() => {
 });
 
 describe("merge workbench state and commands", () => {
+    it("debounces local and durable draft serialization until typing settles", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const mounted = mount(<MergeWorkbench data={data} />);
+        const view = result(mounted.container);
+        act(() => view.dispatch({ changes: { from: 0, insert: "first\n" } }));
+        await act(async () => vi.advanceTimersByTimeAsync(200));
+        act(() => view.dispatch({ changes: { from: 0, insert: "latest\n" } }));
+        await act(async () => vi.advanceTimersByTimeAsync(249));
+        expect(api.setState).not.toHaveBeenCalled();
+        expect(api.postMessage.mock.calls.filter(([msg]) => msg.type === "saveMergeDraft")).toEqual(
+            [],
+        );
+        await act(async () => vi.advanceTimersByTimeAsync(1));
+        expect(api.setState).toHaveBeenCalledTimes(1);
+        expect(api.setState).toHaveBeenCalledWith(
+            expect.objectContaining({ content: "latest\nfirst\n" + base }),
+        );
+        expect(api.postMessage).toHaveBeenCalledWith({
+            type: "saveMergeDraft",
+            draft: api.setState.mock.calls[0][0],
+            revision: 2,
+        });
+        unmount(mounted.root, mounted.container);
+    });
+    it.each(["pagehide", "unmount", "cancel"])(
+        "flushes the last edit before debounce on %s",
+        (event) => {
+            vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+            const mounted = mount(<MergeWorkbench data={data} />);
+            const view = result(mounted.container);
+            act(() => view.dispatch({ changes: { from: 0, insert: "last edit\n" } }));
+            expect(api.setState).not.toHaveBeenCalled();
+            if (event === "pagehide") act(() => window.dispatchEvent(new Event("pagehide")));
+            if (event === "cancel") click(mounted.container, "Cancel");
+            if (event === "unmount") unmount(mounted.root, mounted.container);
+            expect(api.setState).toHaveBeenCalledWith(
+                expect.objectContaining({ content: "last edit\n" + base }),
+            );
+            expect(api.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: "saveMergeDraft",
+                    draft: expect.objectContaining({ content: "last edit\n" + base }),
+                    revision: 1,
+                }),
+            );
+            if (event !== "unmount") unmount(mounted.root, mounted.container);
+        },
+    );
+    it("keeps local edits while preserving the prior operation's durable draft", () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const mounted = mount(<MergeWorkbench data={data} />);
+        receive({
+            type: "mergeDraft",
+            draft: { snapshotId: "a".repeat(64), content: "old", hunks: [] },
+        });
+        act(() => result(mounted.container).dispatch({ changes: { from: 0, insert: "new\n" } }));
+        act(() => window.dispatchEvent(new Event("pagehide")));
+        expect(api.setState).toHaveBeenCalledWith(
+            expect.objectContaining({ content: "new\n" + base }),
+        );
+        expect(api.postMessage.mock.calls.filter(([msg]) => msg.type === "saveMergeDraft")).toEqual(
+            [],
+        );
+        click(mounted.container, "Discard previous draft");
+        expect(api.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "saveMergeDraft",
+                draft: expect.objectContaining({ content: "new\n" + base }),
+            }),
+        );
+        unmount(mounted.root, mounted.container);
+    });
     it("opens the native fallback without dropping the current draft", () => {
         const mounted = mount(<MergeWorkbench data={data} />);
         click(mounted.container, "Accept left change");

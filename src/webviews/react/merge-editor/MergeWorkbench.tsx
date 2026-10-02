@@ -27,6 +27,7 @@ import "./merge-workbench.css";
 
 type Choice = "ours" | "theirs" | "both" | "both-reversed" | "base" | "none";
 
+/** Preserves the requested side order when composing one conflict's replacement lines. */
 function choiceLines(
     choice: Choice,
     segment: { oursLines: string[]; theirsLines: string[]; baseLines: string[] },

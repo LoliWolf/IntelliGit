@@ -58,6 +58,7 @@ const MAX_APPLY_CONTENT_BYTES = 2 * 1024 * 1024;
  */
 export class MergeEditorPanel {
     private static readonly panels = new Map<string, MergeEditorPanel>();
+    private static readonly draftQueues = new Map<string, Promise<void>>();
 
     private readonly panel: vscode.WebviewPanel;
     private disposed = false;
@@ -65,7 +66,6 @@ export class MergeEditorPanel {
     private snapshot?: MergeResolutionSnapshot;
     private applying = false;
     private applied = false;
-    private draftQueue: Promise<void> = Promise.resolve();
     private loading?: Promise<void>;
     private loadedData?: MergeEditorData;
     private readonly syntaxTheme: DiffSyntaxThemeService;
@@ -184,6 +184,7 @@ export class MergeEditorPanel {
      * payload; side-accepting commands resolve through Git rather than webview content.
      */
     private async handleMessage(raw: unknown): Promise<void> {
+        if (!this.isAlive()) return;
         const msg = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
         const type = typeof msg.type === "string" ? msg.type : "";
         switch (type) {
@@ -198,11 +199,7 @@ export class MergeEditorPanel {
                 return;
 
             case "loadMergeDraft":
-                await this.draftQueue;
-                await this.panel.webview.postMessage({
-                    type: "mergeDraft",
-                    draft: parseMergeDraft(this.draftStore?.get(this.draftKey)),
-                });
+                await this.loadDraft();
                 return;
             case "saveMergeDraft": {
                 await this.saveDraft(msg);
@@ -367,6 +364,16 @@ export class MergeEditorPanel {
         }
     }
 
+    /** Waits for prior owners' writes before loading the durable recovery copy. */
+    private async loadDraft(): Promise<void> {
+        await this.draftQueue;
+        if (!this.isAlive()) return;
+        await this.panel.webview.postMessage({
+            type: "mergeDraft",
+            draft: parseMergeDraft(this.draftStore?.get(this.draftKey)),
+        });
+    }
+
     /** Validates and acknowledges a serialized draft without replacing an earlier operation. */
     private async saveDraft(msg: Record<string, unknown>): Promise<void> {
         const draft = parseMergeDraft(msg.draft);
@@ -385,11 +392,24 @@ export class MergeEditorPanel {
         });
     }
 
-    /** Orders durable updates and prevents a late save from recreating an applied draft. */
+    /** Orders writes across panel lifetimes; superseded owners cannot enqueue stale recovery text. */
     private queueDraftUpdate(update: () => Promise<void>): Promise<void> {
-        const pending = this.draftQueue.then(update);
-        this.draftQueue = pending.catch(() => undefined);
+        const pending = this.draftQueue.then(async () => {
+            if (!this.isAlive() || MergeEditorPanel.panels.get(this.panelKey) !== this) return;
+            await update();
+        });
+        const settled = pending.catch(() => undefined);
+        MergeEditorPanel.draftQueues.set(this.draftKey, settled);
+        void settled.then(() => {
+            if (MergeEditorPanel.draftQueues.get(this.draftKey) === settled)
+                MergeEditorPanel.draftQueues.delete(this.draftKey);
+        });
         return pending;
+    }
+
+    /** Reopened panels wait for writes already in flight for the same durable draft key. */
+    private get draftQueue(): Promise<void> {
+        return MergeEditorPanel.draftQueues.get(this.draftKey) ?? Promise.resolve();
     }
 
     private isAlive(): boolean {

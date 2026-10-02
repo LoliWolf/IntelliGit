@@ -246,6 +246,10 @@ test.describe("installed VSIX package smoke", () => {
                 merge.locator('[data-testid="merge-editor-1"] .cm-content'),
             ).toHaveAttribute("contenteditable", "true");
             await expect(merge.locator('.cm-content span[style*="color"]').first()).toBeVisible();
+            // A lingering workbench tab tooltip can cover this webview toolbar on Linux.
+            await window.mouse.move(0, 0);
+            await window.keyboard.press("Escape");
+            await expect(window.locator(".context-view .monaco-hover:visible")).toHaveCount(0);
             await merge
                 .locator(".mw-toolbar")
                 .getByRole("button", { name: "Accept left change", exact: true })

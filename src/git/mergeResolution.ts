@@ -178,7 +178,8 @@ export async function applyMergeResolution(
     if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES || content.includes("\0")) {
         throw mergeError("The merge result exceeds the supported text size.");
     }
-    if (/^(?:<{7}|\|{7}|={7}|>{7})(?: |$)/m.test(content)) {
+    // Equals/pipe underlines are valid document content; only reject opening/closing markers.
+    if (/^(?:<{7}|>{7})(?: [^\r\n]*)?\r?$/m.test(content)) {
         throw mergeError(
             "The result still contains conflict markers. Resolve them before applying.",
         );

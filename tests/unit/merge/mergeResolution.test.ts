@@ -21,6 +21,7 @@ async function conflict(name = "file.ts", base = "base\n", ours = "ours\n", thei
     git("config", "user.email", "test@example.com");
     git("config", "user.name", "Test");
     git("config", "commit.gpgsign", "false");
+    git("config", "core.autocrlf", "false");
     await writeFile(path.join(root, name), base);
     git("add", ".");
     git("commit", "-m", "base");
@@ -106,25 +107,47 @@ describe("immutable merge resolutions", () => {
             applyMergeResolution(executor, root, "file.ts", snapshot, "draft", () => undefined),
         ).rejects.toThrow("changed");
     });
-    it.each(["<<<<<<< ours\nx", "||||||| base\nx", "=======\nx", ">>>>>>> theirs\nx", "bad\0text"])(
-        "refuses markers or NUL: %s",
-        async (content) => {
-            await conflict();
-            const snapshot = await readMergeResolutionSnapshot(executor, root, "file.ts");
-            await expect(
-                applyMergeResolution(executor, root, "file.ts", snapshot, content, () => undefined),
-            ).rejects.toThrow();
-            expect(git("ls-files", "-u")).not.toBe("");
-        },
-    );
+    it.each([
+        "<<<<<<< ours\nx",
+        ">>>>>>> theirs\nx",
+        "<<<<<<<\nx",
+        ">>>>>>>\nx",
+        "<<<<<<< ours\r\nx",
+        ">>>>>>> theirs\r\nx",
+        "<<<<<<<\r\nx",
+        ">>>>>>>\r\nx",
+        "bad\0text",
+    ])("refuses markers or NUL: %s", async (content) => {
+        await conflict();
+        const snapshot = await readMergeResolutionSnapshot(executor, root, "file.ts");
+        await expect(
+            applyMergeResolution(executor, root, "file.ts", snapshot, content, () => undefined),
+        ).rejects.toThrow();
+        expect(git("ls-files", "-u")).not.toBe("");
+    });
+    it.each([
+        "Install\n=======\n",
+        "Title\r\n=======\r\n",
+        "|||||||\n",
+        "||||||| base\r\n",
+        "<<<<<<<identifier\n>>>>>>>identifier\n",
+    ])("accepts ordinary text that resembles partial markers: %s", async (content) => {
+        await conflict();
+        const snapshot = await readMergeResolutionSnapshot(executor, root, "file.ts");
+        await applyMergeResolution(executor, root, "file.ts", snapshot, content, () => undefined);
+        expect(await readFile(path.join(root, "file.ts"), "utf8")).toBe(content);
+        expect(git("show", ":file.ts")).toBe(content);
+        expect(git("ls-files", "-u")).toBe("");
+    });
     it("uses literal pathspecs for magic filenames without touching neighboring files", async () => {
-        const name = ":(glob)*.ts";
+        const name = process.platform === "win32" ? "[glob].ts" : ":(glob)*.ts";
         await conflict(name);
-        await writeFile(path.join(root, "neighbor.ts"), "private\n");
+        const neighbor = process.platform === "win32" ? "g.ts" : "neighbor.ts";
+        await writeFile(path.join(root, neighbor), "private\n");
         const snapshot = await readMergeResolutionSnapshot(executor, root, name);
         await applyMergeResolution(executor, root, name, snapshot, "resolved\n", () => undefined);
         expect(git("--literal-pathspecs", "show", `:${name}`)).toBe("resolved\n");
-        expect(git("ls-files", "--", "neighbor.ts")).toBe("");
+        expect(git("ls-files", "--", neighbor)).toBe("");
     });
     it("refuses a symlink substituted for the worktree file", async () => {
         await conflict();
@@ -140,6 +163,8 @@ describe("immutable merge resolutions", () => {
     it("preserves executable permissions and CRLF bytes", async () => {
         await conflict();
         await chmod(path.join(root, "file.ts"), 0o755);
+        const mode = (await stat(path.join(root, "file.ts"))).mode & 0o777;
+        if (process.platform !== "win32") expect(mode).toBe(0o755);
         const snapshot = await readMergeResolutionSnapshot(executor, root, "file.ts");
         await applyMergeResolution(
             executor,
@@ -149,7 +174,7 @@ describe("immutable merge resolutions", () => {
             "a\r\nb\r\n",
             () => undefined,
         );
-        expect((await stat(path.join(root, "file.ts"))).mode & 0o777).toBe(0o755);
+        expect((await stat(path.join(root, "file.ts"))).mode & 0o777).toBe(mode);
         expect(await readFile(path.join(root, "file.ts"), "utf8")).toBe("a\r\nb\r\n");
     });
     it("refuses deleted-side conflicts instead of confusing deletion with an empty blob", async () => {

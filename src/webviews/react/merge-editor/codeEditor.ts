@@ -67,6 +67,7 @@ const palette = EditorView.theme({
 /** Updates only syntax decorations, preserving selections and history. */
 export const setMergeSyntax = StateEffect.define<ShikiTheme>();
 
+/** Converts TextMate's font-style flags into inline token styles without changing editor text. */
 function tokenStyle(token: { color?: string; fontStyle?: number }): string {
     const flags = token.fontStyle ?? 0;
     return [
@@ -79,6 +80,7 @@ function tokenStyle(token: { color?: string; fontStyle?: number }): string {
         .join(";");
 }
 
+/** Builds grammar-aware token ranges for a normalized CodeMirror document and the current host theme. */
 function syntaxDecorations(state: EditorState, filePath: string, theme: ShikiTheme): DecorationSet {
     const language = langForPath(filePath);
     if (!language) return Decoration.none;
@@ -99,6 +101,7 @@ function syntaxDecorations(state: EditorState, filePath: string, theme: ShikiThe
     return Decoration.set(marks, true);
 }
 
+/** Debounces full-document tokenization while mapping existing highlights through intervening edits. */
 function syntaxPlugin(filePath: string, initialTheme: ShikiTheme) {
     return ViewPlugin.fromClass(
         class {
@@ -142,6 +145,7 @@ const inputHunks = StateField.define<readonly WorkbenchHunk[]>({
     },
 });
 
+/** Highlights changed words inside nonempty base ranges without tinting whole-line insertions twice. */
 function wordDecorations(state: EditorState, hunks: readonly WorkbenchHunk[]): Range<Decoration>[] {
     const marks: Range<Decoration>[] = [];
     for (const hunk of hunks) {
@@ -172,6 +176,7 @@ function wordDecorations(state: EditorState, hunks: readonly WorkbenchHunk[]): R
     return marks;
 }
 
+/** Rebuilds conflict decorations only when text or decision anchors change. */
 function conflictField(readOnly: boolean) {
     return StateField.define<DecorationSet>({
         create: () => Decoration.none,
