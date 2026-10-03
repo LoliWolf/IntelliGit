@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "合併結果資料必須為字串。",
     "Merge result payload exceeds the supported size.": "合併結果資料超出了支援的大小。",
     "Load the conflict before applying a resolution.": "請載入衝突後再套用解決結果。",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "檔案在編輯器中有未儲存的修改。請儲存或捨棄這些修改後再套用，合併草稿已保留。"
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "檔案在編輯器中有未儲存的修改。請儲存或捨棄這些修改後再套用，合併草稿已保留。",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "拉取前，請將 intelligit.updateStrategy 設為 \"rebase\" 或 \"merge\"。",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "此存放庫的工作區資料夾使用了不同的 intelligit.updateStrategy 值。拉取前，請在每個資料夾中選擇相同的值。"
 }

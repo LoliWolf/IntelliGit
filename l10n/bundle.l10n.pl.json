@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "Dane wyniku scalania muszą być ciągiem znaków.",
     "Merge result payload exceeds the supported size.": "Dane wyniku scalania przekraczają obsługiwany rozmiar.",
     "Load the conflict before applying a resolution.": "Wczytaj konflikt przed zastosowaniem rozwiązania.",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Plik ma niezapisane zmiany w edytorze. Zapisz je lub odrzuć przed zastosowaniem; szkic scalania został zachowany."
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Plik ma niezapisane zmiany w edytorze. Zapisz je lub odrzuć przed zastosowaniem; szkic scalania został zachowany.",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Przed wykonaniem Pull ustaw intelligit.updateStrategy na \"rebase\" lub \"merge\".",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Foldery obszaru roboczego tego repozytorium mają różne wartości intelligit.updateStrategy. Przed wykonaniem Pull wybierz tę samą wartość w każdym folderze."
 }
