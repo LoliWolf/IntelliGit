@@ -96,6 +96,11 @@ export class MergeEditorPanel {
             try {
                 await this.handleMessage(message);
             } catch (error) {
+                console.error(
+                    "[IntelliGit] Merge editor operation failed:",
+                    error,
+                    error instanceof Error && error.cause ? getErrorMessage(error.cause) : "",
+                );
                 if (!this.isAlive()) return;
                 const errorMessage = getErrorMessage(error);
                 vscode.window.showErrorMessage(errorMessage);
