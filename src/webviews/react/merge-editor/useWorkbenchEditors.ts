@@ -123,6 +123,7 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
         restore(getVsCodeApi().getState());
         restoring.current = false;
         const receive = (event: MessageEvent<MergeWorkbenchInbound>) => {
+            if (applied.current) return;
             const message = event.data;
             if (message.type === "mergeDraft") restore(message.draft);
             if (message.type === "mergeDraftSaved" && message.revision === revision.current)
@@ -133,6 +134,8 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
             }
             if (message.type === "resolutionApplied") {
                 applied.current = true;
+                setBusy(true);
+                setError(null);
                 clearTimeout(saveTimer.current);
                 getVsCodeApi().setState(null);
             }
