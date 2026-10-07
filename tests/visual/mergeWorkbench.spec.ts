@@ -68,6 +68,9 @@ test("workbench retains the existing merge diff-area design", async ({
     const original = await chrome();
     await mountHarness("merge-editor", { webviewFixture: "conflicted.json" });
     expect(await chrome()).toEqual(original);
+    const apply = page.getByRole("button", { name: "Apply", exact: true });
+    await expect(apply).toBeDisabled();
+    await expect(apply).toHaveCSS("opacity", "0.55");
     await expect(page.locator(".mw-toolbar select.mw-hunks")).toBeVisible();
     await expect(page.locator(".mw-hunks button")).toHaveCount(0);
     const left = page.locator('[data-testid="merge-editor-0"]');
@@ -102,6 +105,8 @@ test("workbench retains the existing merge diff-area design", async ({
     expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(gutter.x + gutter.width);
     await expect(actions.locator(".accept-btn svg path")).toHaveCSS("fill", "rgb(102, 187, 106)");
     await actions.locator(".accept-btn").click();
+    await expect(apply).toBeEnabled();
+    await expect(apply).toHaveCSS("opacity", "1");
     await expect(page.locator(".mw-connectors-ours path").first()).toHaveCSS("fill", "none");
     await expect(page.locator(".mw-connectors-ours path").first()).toHaveCSS(
         "stroke-dasharray",
