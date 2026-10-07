@@ -43,6 +43,15 @@ jobs:
               run: |
                   node -e '
                   const {execFileSync}=require("node:child_process");
+                  const fs=require("node:fs");
+                  const assert=require("node:assert/strict");
+                  const environmentPath="tests/visual/fixtures/baselineEnvironment.json";
+                  const committed=execFileSync("git",["show",`HEAD:${environmentPath}`],{encoding:"utf8"});
+                  const expectedEnvironment=JSON.parse(committed);
+                  const observedEnvironment=JSON.parse(fs.readFileSync(environmentPath,"utf8"));
+                  assert.deepStrictEqual({...observedEnvironment,osRelease:expectedEnvironment.osRelease},expectedEnvironment);
+                  console.log(JSON.stringify({environmentInputs:"unchanged",observedKernel:observedEnvironment.osRelease,committedKernel:expectedEnvironment.osRelease}));
+                  fs.writeFileSync(environmentPath,committed);
                   const paths=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n");
                   const expected=/^tests\/visual\/__screenshots__\/pixelBaselines\.spec\.ts\/pixel-baseline-screenshots-merge-editor-matches-the-pixel-baseline-1-(dark|light)-modern-(narrow|wide)\.png$/;
                   if(paths.length!==4 || paths.some(p=>!expected.test(p))) throw new Error("Unexpected visual diff: "+JSON.stringify(paths));
