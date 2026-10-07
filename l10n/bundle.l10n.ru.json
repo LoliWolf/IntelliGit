@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "Данные результата слияния должны быть строкой.",
     "Merge result payload exceeds the supported size.": "Данные результата слияния превышают допустимый размер.",
     "Load the conflict before applying a resolution.": "Загрузите конфликт перед применением решения.",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "В редакторе есть несохранённые изменения файла. Сохраните или отмените их перед применением; черновик слияния сохранён."
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "В редакторе есть несохранённые изменения файла. Сохраните или отмените их перед применением; черновик слияния сохранён.",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Перед выполнением Pull задайте для intelligit.updateStrategy значение \"rebase\" или \"merge\".",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "В папках рабочей области этого репозитория заданы разные значения intelligit.updateStrategy. Перед выполнением Pull выберите одинаковое значение во всех папках."
 }

@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "Les données du résultat de fusion doivent être une chaîne.",
     "Merge result payload exceeds the supported size.": "Les données du résultat de fusion dépassent la taille prise en charge.",
     "Load the conflict before applying a resolution.": "Chargez le conflit avant d’appliquer une résolution.",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Le fichier contient des modifications non enregistrées dans l’éditeur. Enregistrez-les ou abandonnez-les avant d’appliquer ; votre brouillon de fusion est conservé."
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Le fichier contient des modifications non enregistrées dans l’éditeur. Enregistrez-les ou abandonnez-les avant d’appliquer ; votre brouillon de fusion est conservé.",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Définissez intelligit.updateStrategy sur \"rebase\" ou \"merge\" avant d'exécuter Pull.",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Les dossiers de l'espace de travail de ce dépôt ont des valeurs différentes pour intelligit.updateStrategy. Choisissez la même valeur dans chaque dossier avant d'exécuter Pull."
 }

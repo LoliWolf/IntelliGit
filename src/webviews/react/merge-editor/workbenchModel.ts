@@ -17,6 +17,13 @@ export interface WorkbenchHunk {
     segment: ConflictSegment;
 }
 
+/** Uses the existing merge renderer's conflict and one-sided change palette. */
+export function workbenchChangeClass(hunk: WorkbenchHunk): string {
+    if (hunk.conflict && hunk.resolved) return "merge-range-resolved";
+    if (hunk.conflict) return "merge-range-pending";
+    return hunk.segment.baseLines.length === 0 ? "merge-range-insertion" : "merge-range-pending";
+}
+
 /** Complete initial result and immutable side offsets derived from the established merge grouping. */
 export function buildWorkbenchDocument(data: MergeEditorData): {
     content: string;

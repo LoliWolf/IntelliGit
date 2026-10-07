@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { WorkbenchHunk } from "./workbenchModel";
 
+/** Selects the original input or live result boundary used by linked-scroll interpolation. */
 function anchor(hunk: WorkbenchHunk, pane: number, end: boolean): number {
     if (pane === 0) return end ? hunk.oursTo : hunk.oursFrom;
     if (pane === 2) return end ? hunk.theirsTo : hunk.theirsFrom;

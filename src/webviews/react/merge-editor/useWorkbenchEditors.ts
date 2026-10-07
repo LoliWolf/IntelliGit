@@ -34,6 +34,7 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
     const restoring = useRef(true);
     const applied = useRef(false);
     const blockedDraft = useRef(false);
+    const dirtyDraft = useRef(false);
     const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const latestDraft = useRef<MergeDraft | null>(null);
     const theme = useDiffSyntaxTheme();
@@ -41,13 +42,26 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
 
     const flushDraft = useCallback(() => {
         clearTimeout(saveTimer.current);
-        if (latestDraft.current && !applied.current && !blockedDraft.current)
+        if (applied.current) return;
+        const view = editors.current[1]?.view;
+        if (dirtyDraft.current && view) {
+            latestDraft.current = {
+                snapshotId: data.workbench!.snapshotId,
+                content: view.state.doc.toString(),
+                hunks: view.state
+                    .field(workbenchHunks)
+                    .map(({ id, from, to, resolved }) => ({ id, from, to, resolved })),
+            };
+            dirtyDraft.current = false;
+            getVsCodeApi().setState(latestDraft.current);
+        }
+        if (latestDraft.current && !blockedDraft.current)
             getVsCodeApi<MergeWorkbenchOutbound>().postMessage({
                 type: "saveMergeDraft",
                 draft: latestDraft.current,
                 revision: revision.current,
             });
-    }, []);
+    }, [data]);
     const update = useCallback(
         (view: EditorView) => {
             const current = view.state.field(workbenchHunks);
@@ -55,17 +69,11 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
             if (restoring.current) return;
             revision.current++;
             setSaved(false);
-            const draft: MergeDraft = {
-                snapshotId: data.workbench!.snapshotId,
-                content: view.state.doc.toString(),
-                hunks: current.map(({ id, from, to, resolved }) => ({ id, from, to, resolved })),
-            };
-            latestDraft.current = draft;
-            getVsCodeApi().setState(draft);
+            dirtyDraft.current = true;
             clearTimeout(saveTimer.current);
             saveTimer.current = setTimeout(flushDraft, 250);
         },
-        [data, flushDraft],
+        [flushDraft],
     );
 
     useEffect(() => {
@@ -83,6 +91,7 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
                 filePath: data.filePath,
                 label: labels[pane],
                 theme: initialTheme.current,
+                side: pane === 0 ? "ours" : pane === 2 ? "theirs" : undefined,
                 update: pane === 1 ? update : undefined,
             }),
         );
@@ -115,6 +124,7 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
         restore(getVsCodeApi().getState());
         restoring.current = false;
         const receive = (event: MessageEvent<MergeWorkbenchInbound>) => {
+            if (applied.current) return;
             const message = event.data;
             if (message.type === "mergeDraft") restore(message.draft);
             if (message.type === "mergeDraftSaved" && message.revision === revision.current)
@@ -125,6 +135,8 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
             }
             if (message.type === "resolutionApplied") {
                 applied.current = true;
+                setBusy(true);
+                setError(null);
                 clearTimeout(saveTimer.current);
                 getVsCodeApi().setState(null);
             }

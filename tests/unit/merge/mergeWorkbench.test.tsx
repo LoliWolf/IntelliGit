@@ -72,6 +72,7 @@ beforeEach(() => {
     });
 });
 afterEach(() => {
+    vi.useRealTimers();
     Reflect.deleteProperty(Range.prototype, "getClientRects");
     Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
     vi.restoreAllMocks();
@@ -79,6 +80,111 @@ afterEach(() => {
 });
 
 describe("merge workbench state and commands", () => {
+    it("reuses existing merge chrome and row bands instead of the additional hunk strip", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        expect(mounted.container.querySelector(".merge-editor.merge-workbench")).not.toBeNull();
+        expect(mounted.container.querySelector(".merge-toolbar .toolbar-left")).not.toBeNull();
+        expect(mounted.container.querySelector(".pane-meta-center")?.textContent).toContain(
+            "file.ts",
+        );
+        expect(mounted.container.querySelector(".merge-footer .footer-right")).not.toBeNull();
+        expect(mounted.container.querySelector(".mw-hunks button")).toBeNull();
+        expect(mounted.container.querySelector("select.mw-hunks option")?.textContent).toBe(
+            "Change 1",
+        );
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")?.textContent).toBe(
+            "ours",
+        );
+        click(mounted.container, "Accept left change");
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")).toBeNull();
+        expect(mounted.container.querySelector(".cm-line.merge-range-resolved")).not.toBeNull();
+        click(mounted.container, "Undo");
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")).not.toBeNull();
+        unmount(mounted.root, mounted.container);
+    });
+    it("keeps the inline remove-block control reversible", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        const button = mounted.container.querySelector<HTMLButtonElement>(
+            ".mw-actions .discard-btn",
+        )!;
+        act(() => button.click());
+        expect(result(mounted.container).state.doc.toString()).toBe("head\ntail\n");
+        click(mounted.container, "Undo");
+        expect(result(mounted.container).state.doc.toString()).toBe(base);
+        unmount(mounted.root, mounted.container);
+    });
+    it("debounces local and durable draft serialization until typing settles", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const mounted = mount(<MergeWorkbench data={data} />);
+        const view = result(mounted.container);
+        act(() => view.dispatch({ changes: { from: 0, insert: "first\n" } }));
+        await act(async () => vi.advanceTimersByTimeAsync(200));
+        act(() => view.dispatch({ changes: { from: 0, insert: "latest\n" } }));
+        await act(async () => vi.advanceTimersByTimeAsync(249));
+        expect(api.setState).not.toHaveBeenCalled();
+        expect(api.postMessage.mock.calls.filter(([msg]) => msg.type === "saveMergeDraft")).toEqual(
+            [],
+        );
+        await act(async () => vi.advanceTimersByTimeAsync(1));
+        expect(api.setState).toHaveBeenCalledTimes(1);
+        expect(api.setState).toHaveBeenCalledWith(
+            expect.objectContaining({ content: "latest\nfirst\n" + base }),
+        );
+        expect(api.postMessage).toHaveBeenCalledWith({
+            type: "saveMergeDraft",
+            draft: api.setState.mock.calls[0][0],
+            revision: 2,
+        });
+        unmount(mounted.root, mounted.container);
+    });
+    it.each(["pagehide", "unmount", "cancel"])(
+        "flushes the last edit before debounce on %s",
+        (event) => {
+            vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+            const mounted = mount(<MergeWorkbench data={data} />);
+            const view = result(mounted.container);
+            act(() => view.dispatch({ changes: { from: 0, insert: "last edit\n" } }));
+            expect(api.setState).not.toHaveBeenCalled();
+            if (event === "pagehide") act(() => window.dispatchEvent(new Event("pagehide")));
+            if (event === "cancel") click(mounted.container, "Cancel");
+            if (event === "unmount") unmount(mounted.root, mounted.container);
+            expect(api.setState).toHaveBeenCalledWith(
+                expect.objectContaining({ content: "last edit\n" + base }),
+            );
+            expect(api.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: "saveMergeDraft",
+                    draft: expect.objectContaining({ content: "last edit\n" + base }),
+                    revision: 1,
+                }),
+            );
+            if (event !== "unmount") unmount(mounted.root, mounted.container);
+        },
+    );
+    it("keeps local edits while preserving the prior operation's durable draft", () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        const mounted = mount(<MergeWorkbench data={data} />);
+        receive({
+            type: "mergeDraft",
+            draft: { snapshotId: "a".repeat(64), content: "old", hunks: [] },
+        });
+        act(() => result(mounted.container).dispatch({ changes: { from: 0, insert: "new\n" } }));
+        act(() => window.dispatchEvent(new Event("pagehide")));
+        expect(api.setState).toHaveBeenCalledWith(
+            expect.objectContaining({ content: "new\n" + base }),
+        );
+        expect(api.postMessage.mock.calls.filter(([msg]) => msg.type === "saveMergeDraft")).toEqual(
+            [],
+        );
+        click(mounted.container, "Discard previous draft");
+        expect(api.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "saveMergeDraft",
+                draft: expect.objectContaining({ content: "new\n" + base }),
+            }),
+        );
+        unmount(mounted.root, mounted.container);
+    });
     it("opens the native fallback without dropping the current draft", () => {
         const mounted = mount(<MergeWorkbench data={data} />);
         click(mounted.container, "Accept left change");
@@ -150,6 +256,20 @@ describe("merge workbench state and commands", () => {
         expect(api.setState).toHaveBeenCalledWith(null);
         unmount(mounted.root, mounted.container);
     });
+    it("keeps a completed resolution read-only despite a late error", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        click(mounted.container, "Accept left change");
+        click(mounted.container, "Apply");
+        receive({ type: "resolutionApplied" });
+        api.postMessage.mockClear();
+        receive({ type: "resolutionError", message: "cleanup failed" });
+        expect(result(mounted.container).contentDOM.getAttribute("contenteditable")).toBe("false");
+        expect(mounted.container.querySelector('[role="alert"]')).toBeNull();
+        act(() => window.dispatchEvent(new Event("pagehide")));
+        expect(api.postMessage).not.toHaveBeenCalled();
+        unmount(mounted.root, mounted.container);
+    });
+
     it("restores matching local drafts before late durable loads and preserves stale drafts", () => {
         const draft = {
             snapshotId: data.workbench.snapshotId,

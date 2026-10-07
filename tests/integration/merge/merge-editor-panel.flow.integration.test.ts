@@ -10,6 +10,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface CapturedPanel {
+    dispose(): void;
     html: string;
     messageHandler: ((msg: unknown) => Promise<void>) | null;
     postedMessages: unknown[];
@@ -19,6 +20,7 @@ interface CapturedPanel {
 
 const mocks = vi.hoisted(() => {
     interface HoistedPanel {
+        dispose(): void;
         html: string;
         messageHandler: ((msg: unknown) => Promise<void>) | null;
         postedMessages: unknown[];
@@ -31,6 +33,7 @@ const mocks = vi.hoisted(() => {
         showErrorMessage: vi.fn(async () => undefined),
         showWarningMessage: vi.fn(async () => undefined),
         executeCommand: vi.fn(async () => undefined),
+        completionDeliveryError: undefined as Error | undefined,
         textDocuments: [] as Array<{ uri: { scheme: string; fsPath: string }; isDirty: boolean }>,
     };
 });
@@ -80,6 +83,10 @@ vi.mock("vscode", () => {
             createWebviewPanel: () => {
                 const disposeListeners: Array<() => void> = [];
                 const captured = {
+                    dispose: () => {
+                        captured.disposed = true;
+                        for (const listener of disposeListeners) listener();
+                    },
                     html: "",
                     messageHandler: null as ((msg: unknown) => Promise<void>) | null,
                     postedMessages: [] as unknown[],
@@ -102,6 +109,11 @@ vi.mock("vscode", () => {
                             return { dispose: () => undefined };
                         },
                         postMessage: async (msg: unknown) => {
+                            if (
+                                (msg as { type?: string }).type === "resolutionApplied" &&
+                                mocks.completionDeliveryError
+                            )
+                                throw mocks.completionDeliveryError;
                             captured.postedMessages.push(msg);
                             return true;
                         },
@@ -113,10 +125,7 @@ vi.mock("vscode", () => {
                         disposeListeners.push(listener);
                         return { dispose: () => undefined };
                     },
-                    dispose: () => {
-                        captured.disposed = true;
-                        for (const listener of disposeListeners) listener();
-                    },
+                    dispose: captured.dispose,
                 };
             },
         },
@@ -248,6 +257,7 @@ beforeEach(async () => {
     repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-merge-editor-"));
     mocks.capturedPanels.length = 0;
     mocks.textDocuments.length = 0;
+    mocks.completionDeliveryError = undefined;
     vi.clearAllMocks();
 });
 
@@ -259,6 +269,7 @@ afterEach(async () => {
         }
     }
     await removeScratchDirectories(repoRoot);
+    vi.restoreAllMocks();
 });
 
 describe("MergeEditorPanel end-to-end merge flow", () => {
@@ -309,6 +320,211 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         await fireMessage(panel, { type: "applyResolution", content: "resolved\n" });
         await fireMessage(panel, { type: "saveMergeDraft", draft: first, revision: 3 });
         expect([...values.values()]).toEqual([undefined]);
+    });
+
+    it("keeps successful staging terminal when durable draft cleanup rejects", async () => {
+        await createConflictRepo();
+        let value: unknown;
+        const cleanupError = new Error("draft storage unavailable");
+        let release!: () => void;
+        let cleanupStarted!: () => void;
+        const cleanupGate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const cleaning = new Promise<void>((resolve) => {
+            cleanupStarted = resolve;
+        });
+        const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const store = {
+            get: () => value,
+            update: vi.fn(async (_key: string, next: unknown) => {
+                if (next === undefined) {
+                    cleanupStarted();
+                    await cleanupGate;
+                    throw cleanupError;
+                }
+                value = next;
+            }),
+        };
+        const onConflictStateChanged = vi.fn(async () => undefined);
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), {
+                draftStore: store as never,
+                onConflictStateChanged,
+            }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const snapshotId = findConflictData(panel).workbench!.snapshotId;
+        const draft = { snapshotId, content: "resolved\n", hunks: [] };
+        await fireMessage(panel, { type: "saveMergeDraft", draft, revision: 1 });
+        const applying = fireMessage(panel, { type: "applyResolution", content: draft.content });
+        await cleaning;
+        await fireMessage(panel, { type: "applyResolution", content: "late apply\n" });
+        const lateSave = fireMessage(panel, {
+            type: "saveMergeDraft",
+            draft: { ...draft, content: "late draft\n" },
+            revision: 2,
+        });
+        release();
+        await Promise.all([applying, lateSave]);
+        expect(git(["ls-files", "-u"])).toBe("");
+        expect(git(["show", ":shared.ts"])).toBe(draft.content);
+        expect(panel.postedMessages).toContainEqual({ type: "resolutionApplied" });
+        expect(panel.postedMessages).not.toContainEqual(
+            expect.objectContaining({ type: "resolutionError" }),
+        );
+        expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+        expect(mocks.showInformationMessage).toHaveBeenCalledWith("Merged and staged: shared.ts");
+        expect(onConflictStateChanged).toHaveBeenCalledOnce();
+        expect(panel.disposed).toBe(true);
+        expect(value).toEqual(draft);
+        expect(diagnostics).toHaveBeenCalledWith(
+            "[IntelliGit] Failed to clear an applied merge draft:",
+            cleanupError,
+        );
+        await fireMessage(panel, { type: "saveMergeDraft", draft, revision: 2 });
+        expect(store.update).toHaveBeenCalledTimes(2);
+    });
+
+    it("finishes staged resolutions even when completion delivery rejects", async () => {
+        await createConflictRepo();
+        let value: unknown;
+        const store = {
+            get: () => value,
+            update: async (_key: string, next: unknown) => {
+                value = next;
+            },
+        };
+        const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const deliveryError = new Error("webview unavailable");
+        const onConflictStateChanged = vi.fn(async () => undefined);
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), {
+                draftStore: store as never,
+                onConflictStateChanged,
+            }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const draft = {
+            snapshotId: findConflictData(panel).workbench!.snapshotId,
+            content: "resolved\n",
+            hunks: [],
+        };
+        await fireMessage(panel, { type: "saveMergeDraft", draft, revision: 1 });
+        mocks.completionDeliveryError = deliveryError;
+        await fireMessage(panel, { type: "applyResolution", content: draft.content });
+        expect(git(["ls-files", "-u"])).toBe("");
+        expect(git(["show", ":shared.ts"])).toBe(draft.content);
+        expect(panel.postedMessages).not.toContainEqual(
+            expect.objectContaining({ type: "resolutionError" }),
+        );
+        expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+        expect(onConflictStateChanged).toHaveBeenCalledOnce();
+        expect(panel.disposed).toBe(true);
+        expect(value).toBeUndefined();
+        expect(diagnostics).toHaveBeenCalledWith(
+            "[IntelliGit] Failed to deliver merge completion:",
+            deliveryError,
+        );
+    });
+
+    it("orders in-flight saves across native disposal and rejects superseded queued writes", async () => {
+        await createConflictRepo();
+        let release!: () => void;
+        let started!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const writing = new Promise<void>((resolve) => {
+            started = resolve;
+        });
+        let value: unknown;
+        const writes: unknown[] = [];
+        const store = {
+            get: () => value,
+            update: async (_key: string, next: unknown) => {
+                writes.push(next);
+                if (writes.length === 1) {
+                    started();
+                    await gate;
+                }
+                value = next;
+            },
+        };
+        const options = makeOptions(new GitOps(new GitExecutor(repoRoot)), {
+            draftStore: store as never,
+        });
+        await MergeEditorPanel.open(options);
+        const oldPanel = lastPanel();
+        await fireMessage(oldPanel, { type: "ready" });
+        const snapshotId = findConflictData(oldPanel).workbench!.snapshotId;
+        const first = { snapshotId, content: "in flight", hunks: [] };
+        const superseded = { snapshotId, content: "superseded", hunks: [] };
+        const latest = { snapshotId, content: "reopened latest", hunks: [] };
+        const firstSave = fireMessage(oldPanel, {
+            type: "saveMergeDraft",
+            draft: first,
+            revision: 1,
+        });
+        await writing;
+        const oldSave = fireMessage(oldPanel, {
+            type: "saveMergeDraft",
+            draft: superseded,
+            revision: 2,
+        });
+        oldPanel.dispose();
+        await MergeEditorPanel.open(options);
+        const reopened = lastPanel();
+        await fireMessage(reopened, { type: "ready" });
+        const load = fireMessage(reopened, { type: "loadMergeDraft" });
+        const newSave = fireMessage(reopened, {
+            type: "saveMergeDraft",
+            draft: latest,
+            revision: 1,
+        });
+        await fireMessage(oldPanel, { type: "discardMergeDraft", snapshotId });
+        release();
+        await Promise.all([firstSave, oldSave, load, newSave]);
+        expect(writes).toEqual([first, latest]);
+        expect(value).toEqual(latest);
+        expect(reopened.postedMessages).toContainEqual({ type: "mergeDraft", draft: first });
+        await fireMessage(oldPanel, { type: "saveMergeDraft", draft: superseded, revision: 3 });
+        expect(value).toEqual(latest);
+    });
+
+    it("drains the current owner's queued draft before explicit close", async () => {
+        await createConflictRepo();
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let value: unknown;
+        const store = {
+            get: () => value,
+            update: async (_key: string, next: unknown) => {
+                await gate;
+                value = next;
+            },
+        };
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), { draftStore: store as never }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const draft = {
+            snapshotId: findConflictData(panel).workbench!.snapshotId,
+            content: "last",
+            hunks: [],
+        };
+        const saving = fireMessage(panel, { type: "saveMergeDraft", draft, revision: 1 });
+        const closing = fireMessage(panel, { type: "close" });
+        expect(panel.disposed).toBe(false);
+        release();
+        await Promise.all([saving, closing]);
+        expect(value).toEqual(draft);
+        expect(panel.disposed).toBe(true);
     });
 
     it("does not overwrite or discard an older operation draft without its identity", async () => {

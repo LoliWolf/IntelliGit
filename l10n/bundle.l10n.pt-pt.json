@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "Os dados do resultado da integração devem ser uma cadeia de caracteres.",
     "Merge result payload exceeds the supported size.": "Os dados do resultado da integração excedem o tamanho suportado.",
     "Load the conflict before applying a resolution.": "Carregue o conflito antes de aplicar uma resolução.",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "O ficheiro tem alterações não guardadas no editor. Guarde-as ou descarte-as antes de aplicar; o rascunho de integração foi mantido."
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "O ficheiro tem alterações não guardadas no editor. Guarde-as ou descarte-as antes de aplicar; o rascunho de integração foi mantido.",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Defina intelligit.updateStrategy como \"rebase\" ou \"merge\" antes de executar Puxar.",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "As pastas da área de trabalho deste repositório têm valores diferentes para intelligit.updateStrategy. Escolha o mesmo valor em cada pasta antes de executar Puxar."
 }

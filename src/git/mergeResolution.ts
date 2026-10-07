@@ -25,8 +25,8 @@ export interface MergeResolutionSnapshot {
 }
 
 /** Keeps Git operations usable in non-extension tests while honoring host localization. */
-function mergeError(message: string): Error {
-    return new Error(getVsCodeApi()?.l10n.t(message) ?? message);
+function mergeError(message: string, options?: ErrorOptions): Error {
+    return new Error(getVsCodeApi()?.l10n.t(message) ?? message, options);
 }
 
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
@@ -178,7 +178,8 @@ export async function applyMergeResolution(
     if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES || content.includes("\0")) {
         throw mergeError("The merge result exceeds the supported text size.");
     }
-    if (/^(?:<{7}|\|{7}|={7}|>{7})(?: |$)/m.test(content)) {
+    // Equals/pipe underlines are valid document content; only reject opening/closing markers.
+    if (/^(?:<{7}|>{7})(?: [^\r\n]*)?\r?$/m.test(content)) {
         throw mergeError(
             "The result still contains conflict markers. Resolve them before applying.",
         );
@@ -218,9 +219,10 @@ export async function applyMergeResolution(
         await assertNoDirtyEditor();
         try {
             await run(withLiteralPathspecs(["add", "--", safePath]));
-        } catch {
+        } catch (cause) {
             throw mergeError(
                 "The result was saved but staging failed. Your draft is retained; inspect the file and stage it before continuing.",
+                { cause },
             );
         }
     });

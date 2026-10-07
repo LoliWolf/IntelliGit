@@ -858,5 +858,7 @@
     "Merge result payload must be a string.": "マージ結果のデータは文字列である必要があります。",
     "Merge result payload exceeds the supported size.": "マージ結果のデータがサポートされるサイズを超えています。",
     "Load the conflict before applying a resolution.": "解決を適用する前に競合を読み込んでください。",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "ファイルにエディターの未保存の変更があります。適用前に保存または破棄してください。マージの下書きは保持されています。"
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "ファイルにエディターの未保存の変更があります。適用前に保存または破棄してください。マージの下書きは保持されています。",
+    "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "プルする前に intelligit.updateStrategy を \"rebase\" または \"merge\" に設定してください。",
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "このリポジトリのワークスペースフォルダーで intelligit.updateStrategy の値が異なっています。プルする前に、各フォルダーで同じ値を選択してください。"
 }

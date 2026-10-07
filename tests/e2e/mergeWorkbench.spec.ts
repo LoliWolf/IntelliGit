@@ -30,9 +30,9 @@ async function openMerge(page: Page, reuseVisibleSession = false): Promise<Frame
 
 /** Resolves each original change through visible per-change navigation and side decisions. */
 async function acceptOurs(frame: FrameLocator): Promise<void> {
-    const changes = frame.locator(".mw-hunks button");
-    for (let i = 0; i < (await changes.count()); i++) {
-        await changes.nth(i).click();
+    const changes = frame.locator("select.mw-hunks");
+    for (let i = 0; i < (await changes.locator("option").count()); i++) {
+        await changes.selectOption(String(i));
         await frame
             .locator(".mw-toolbar")
             .getByRole("button", { name: "Accept left change", exact: true })
@@ -139,13 +139,20 @@ test.describe("Full-document Git merge workbench", () => {
             await expect.poll(() => result().innerText()).toBe(draft);
             await expect(frame.getByRole("button", { name: "Undo", exact: true })).toBeEnabled();
             await page.screenshot({ path: testInfo.outputPath("merge-light.png") });
+            // Close immediately after typing; the 250 ms draft timer must not lose this edit.
+            await result().click();
+            await result().press("Control+End");
+            await result().press("End");
+            await result().press("Enter");
+            await result().pressSequentially("last-second draft");
+            const finalDraft = await result().innerText();
             await frame.getByRole("button", { name: "Cancel", exact: true }).click();
             await expect(
                 page.getByRole("tab").filter({ hasText: "Merge: conflict.txt" }),
             ).toHaveCount(0);
             // Cancel reveals the existing chooser; no redundant async command may reveal it later.
             frame = await openMerge(page, true);
-            await expect.poll(() => result().innerText()).toBe(draft);
+            await expect.poll(() => result().innerText()).toBe(finalDraft);
             await acceptOurs(frame);
             await frame.getByRole("button", { name: "Apply", exact: true }).click();
             await expect
@@ -187,6 +194,54 @@ test.describe("Full-document Git merge workbench", () => {
                 "external change\n",
             );
             expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).not.toBe("");
+        } finally {
+            await app.close();
+        }
+    });
+
+    test("retains the saved result, draft and Git error when staging is locked", async ({
+        fixtureWorkspace,
+    }, testInfo) => {
+        const { workspace } = fixtureWorkspace;
+        const stages = await runGit(workspace.root, ["ls-files", "-u"], workspace.env);
+        const mergeErrors: string[] = [];
+        const ours = await runGit(workspace.root, ["show", ":2:conflict.txt"], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const frame = await openMerge(page);
+            await acceptOurs(frame);
+            await expect(frame.locator(".mw-footer")).toContainText("Draft saved");
+            page.on("console", (message) => {
+                if (message.text().includes("[IntelliGit] Merge editor operation failed:")) {
+                    mergeErrors.push(message.text());
+                }
+            });
+            const lockPath = path.join(workspace.root, ".git/index.lock");
+            await writeFile(lockPath, "owned by test", { flag: "wx" });
+            await frame.getByRole("button", { name: "Apply", exact: true }).click();
+            await expect(frame.locator(".mw-error")).toContainText("staging failed");
+            await expect(frame.locator(".mw-footer")).toContainText("Draft saved");
+            await expect(
+                frame.locator('[data-testid="merge-editor-1"] .cm-content'),
+            ).toHaveAttribute("contenteditable", "true");
+            expect(await readFile(path.join(workspace.root, "conflict.txt"), "utf8")).toBe(ours);
+            expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).toBe(stages);
+            expect(await readFile(lockPath, "utf8")).toBe("owned by test");
+            await expect.poll(() => mergeErrors.join("\n")).toContain("index.lock");
+            await testInfo.attach("merge-operation-errors.log", {
+                body: mergeErrors.join("\n"),
+                contentType: "text/plain",
+            });
+            await page.screenshot({ path: testInfo.outputPath("merge-stage-failure.png") });
         } finally {
             await app.close();
         }
@@ -302,7 +357,7 @@ test.describe("Full-document Git merge workbench", () => {
             await dismissFirstRunDialogs(page);
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const frame = await openMerge(page);
-            await expect(frame.locator(".mw-hunks button")).toHaveCount(3);
+            await expect(frame.locator("select.mw-hunks option")).toHaveCount(3);
             const result = frame.locator('[data-testid="merge-editor-1"] .cm-content');
             await frame
                 .getByRole("combobox", { name: "Resolve change" })
