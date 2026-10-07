@@ -393,7 +393,7 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                         {t("common.cancel")}
                     </button>
                     <button
-                        className="footer-btn primary"
+                        className={`footer-btn primary${pending > 0 || busy ? " disabled" : ""}`}
                         disabled={pending > 0 || busy}
                         onClick={apply}
                     >
