@@ -109,6 +109,7 @@
 .merge-workbench .cm-line.merge-range-pending {
     background: var(--merge-conflict-block-bg);
     color-scheme: dark;
+    color: var(--merge-action-icon);
 }
 .merge-workbench .cm-gutterElement.merge-range-pending {
     background: var(--merge-conflict-ribbon-bg);
@@ -117,6 +118,9 @@
 .merge-workbench .cm-gutterElement.merge-range-insertion {
     background: var(--merge-inserted-block-bg);
     color-scheme: dark;
+}
+.merge-workbench .cm-line.merge-range-insertion {
+    color: var(--merge-action-icon);
 }
 .merge-workbench .cm-line.merge-range-resolved,
 .merge-workbench .cm-gutterElement.merge-range-resolved {

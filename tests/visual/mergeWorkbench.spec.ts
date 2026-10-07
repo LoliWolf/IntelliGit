@@ -84,6 +84,7 @@ test("workbench retains the existing merge diff-area design", async ({
     await expect(left.locator(".cm-scroller")).toHaveCSS("line-height", "20px");
     const changed = left.locator(".cm-line.merge-range-pending").first();
     await expect(changed).toHaveCSS("background-color", "rgb(59, 42, 50)");
+    await expect(changed).toHaveCSS("color", "rgb(171, 178, 191)");
     await expect(left.locator(".cm-gutterElement.merge-range-pending").first()).toHaveCSS(
         "background-color",
         "rgb(75, 21, 21)",
@@ -103,6 +104,10 @@ test("workbench retains the existing merge diff-area design", async ({
         "2px, 2px",
     );
     await expect(left.locator(".cm-line.merge-range-pending")).toHaveCount(0);
+    await expect(left.locator(".cm-line.merge-range-resolved").first()).toHaveCSS(
+        "color",
+        await color(page, "--vscode-editor-foreground"),
+    );
     const contour = await left
         .locator(".cm-line.merge-range-resolved")
         .first()
