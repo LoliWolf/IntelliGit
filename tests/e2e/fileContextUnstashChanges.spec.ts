@@ -382,9 +382,9 @@ test("Explorer, tab and editor unstash clicked B by OID while active A stays unc
             .toBe(true);
         await expect(mergeFrame!.locator(".merge-workbench")).toContainText("committed conflict");
         await expect(mergeFrame!.locator(".merge-workbench")).toContainText("stash conflict");
-        const changes = mergeFrame!.locator(".mw-hunks button");
-        for (let index = 0; index < (await changes.count()); index++) {
-            await changes.nth(index).click();
+        const changes = mergeFrame!.locator("select.mw-hunks");
+        for (let index = 0; index < (await changes.locator("option").count()); index++) {
+            await changes.selectOption(String(index));
             await mergeFrame!
                 .locator(".mw-toolbar")
                 .getByRole("button", { name: "Accept right change", exact: true })

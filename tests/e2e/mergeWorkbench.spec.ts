@@ -30,9 +30,9 @@ async function openMerge(page: Page, reuseVisibleSession = false): Promise<Frame
 
 /** Resolves each original change through visible per-change navigation and side decisions. */
 async function acceptOurs(frame: FrameLocator): Promise<void> {
-    const changes = frame.locator(".mw-hunks button");
-    for (let i = 0; i < (await changes.count()); i++) {
-        await changes.nth(i).click();
+    const changes = frame.locator("select.mw-hunks");
+    for (let i = 0; i < (await changes.locator("option").count()); i++) {
+        await changes.selectOption(String(i));
         await frame
             .locator(".mw-toolbar")
             .getByRole("button", { name: "Accept left change", exact: true })
@@ -357,7 +357,7 @@ test.describe("Full-document Git merge workbench", () => {
             await dismissFirstRunDialogs(page);
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const frame = await openMerge(page);
-            await expect(frame.locator(".mw-hunks button")).toHaveCount(3);
+            await expect(frame.locator("select.mw-hunks option")).toHaveCount(3);
             const result = frame.locator('[data-testid="merge-editor-1"] .cm-content');
             await frame
                 .getByRole("combobox", { name: "Resolve change" })

@@ -91,6 +91,7 @@ export function useWorkbenchEditors(inputData: MergeEditorData) {
                 filePath: data.filePath,
                 label: labels[pane],
                 theme: initialTheme.current,
+                side: pane === 0 ? "ours" : pane === 2 ? "theirs" : undefined,
                 update: pane === 1 ? update : undefined,
             }),
         );

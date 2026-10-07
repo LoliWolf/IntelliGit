@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, type RefObject } from "react";
 import type { EditorView } from "@codemirror/view";
-import { VscArrowLeft, VscArrowRight } from "react-icons/vsc";
-import type { WorkbenchHunk } from "./workbenchModel";
+import { VscChevronLeft, VscChevronRight, VscClose } from "react-icons/vsc";
+import { workbenchChangeClass, type WorkbenchHunk } from "./workbenchModel";
 import { t } from "../shared/i18n";
 
 /** Links visible input changes to their live result ranges with inline accept controls. */
@@ -11,12 +11,14 @@ export function MergeConnectors({
     side,
     busy,
     accept,
+    discard,
 }: {
     editors: RefObject<Array<{ view: EditorView }>>;
     hunks: readonly WorkbenchHunk[];
     side: "ours" | "theirs";
     busy: boolean;
     accept: (index: number) => void;
+    discard: (index: number) => void;
 }) {
     const host = useRef<HTMLDivElement | null>(null);
     // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- Every pane listener, ResizeObserver and pending animation frame is released by the returned cleanup.
@@ -53,13 +55,13 @@ export function MergeConnectors({
                             : "";
                     path.setAttribute(
                         "d",
-                        `M0 ${left[0]} C16 ${left[0]} 16 ${right[0]} 32 ${right[0]} L32 ${right[1]} C16 ${right[1]} 16 ${left[1]} 0 ${left[1]} Z`,
+                        `M0 ${left[0]} C14 ${left[0]} 14 ${right[0]} 28 ${right[0]} L28 ${right[1]} C14 ${right[1]} 14 ${left[1]} 0 ${left[1]} Z`,
                     );
                 }
-                const button = node.querySelector<HTMLButtonElement>(`[data-accept="${index}"]`);
-                if (button) {
-                    button.style.top = `${input[0]}px`;
-                    button.hidden = input[0] < 0 || input[0] > box.height - 22;
+                const actions = node.querySelector<HTMLElement>(`[data-actions="${index}"]`);
+                if (actions) {
+                    actions.style.top = `${input[0] - 2}px`;
+                    actions.hidden = input[0] < 0 || input[0] > box.height - 20;
                 }
             });
         };
@@ -80,27 +82,38 @@ export function MergeConnectors({
     }, [editors, hunks, side]);
     const label = t(side === "ours" ? "merge.workbench.takeOurs" : "merge.workbench.takeTheirs");
     return (
-        <div className="mw-connectors" ref={host}>
-            <svg width="32" height="100%" aria-hidden="true">
+        <div className={`mw-connectors mw-connectors-${side}`} ref={host}>
+            <svg width="28" height="100%" aria-hidden="true">
                 {hunks.map((hunk, index) => (
                     <path
                         key={hunk.id}
                         data-ribbon={index}
-                        className={hunk.resolved ? "resolved" : "pending"}
+                        className={workbenchChangeClass(hunk)}
                     />
                 ))}
             </svg>
             {hunks.map((hunk, index) => (
-                <button
-                    key={hunk.id}
-                    data-accept={index}
-                    disabled={busy}
-                    title={label}
-                    aria-label={label}
-                    onClick={() => accept(index)}
-                >
-                    {side === "ours" ? <VscArrowRight /> : <VscArrowLeft />}
-                </button>
+                <div key={hunk.id} className="mw-actions" data-actions={index}>
+                    <button
+                        className="action-btn discard-btn"
+                        disabled={busy}
+                        title={t("merge.status.removeBlock")}
+                        aria-label={t("merge.status.removeBlock")}
+                        onClick={() => discard(index)}
+                    >
+                        <VscClose />
+                    </button>
+                    <button
+                        className="action-btn accept-btn"
+                        data-accept={index}
+                        disabled={busy}
+                        title={label}
+                        aria-label={label}
+                        onClick={() => accept(index)}
+                    >
+                        {side === "ours" ? <VscChevronRight /> : <VscChevronLeft />}
+                    </button>
+                </div>
             ))}
         </div>
     );

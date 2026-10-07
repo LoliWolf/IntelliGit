@@ -80,6 +80,39 @@ afterEach(() => {
 });
 
 describe("merge workbench state and commands", () => {
+    it("reuses existing merge chrome and row bands instead of the additional hunk strip", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        expect(mounted.container.querySelector(".merge-editor.merge-workbench")).not.toBeNull();
+        expect(mounted.container.querySelector(".merge-toolbar .toolbar-left")).not.toBeNull();
+        expect(mounted.container.querySelector(".pane-meta-center")?.textContent).toContain(
+            "file.ts",
+        );
+        expect(mounted.container.querySelector(".merge-footer .footer-right")).not.toBeNull();
+        expect(mounted.container.querySelector(".mw-hunks button")).toBeNull();
+        expect(mounted.container.querySelector("select.mw-hunks option")?.textContent).toBe(
+            "Change 1",
+        );
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")?.textContent).toBe(
+            "ours",
+        );
+        click(mounted.container, "Accept left change");
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")).toBeNull();
+        expect(mounted.container.querySelector(".cm-line.merge-range-resolved")).not.toBeNull();
+        click(mounted.container, "Undo");
+        expect(mounted.container.querySelector(".cm-line.merge-range-pending")).not.toBeNull();
+        unmount(mounted.root, mounted.container);
+    });
+    it("keeps the inline remove-block control reversible", () => {
+        const mounted = mount(<MergeWorkbench data={data} />);
+        const button = mounted.container.querySelector<HTMLButtonElement>(
+            ".mw-actions .discard-btn",
+        )!;
+        act(() => button.click());
+        expect(result(mounted.container).state.doc.toString()).toBe("head\ntail\n");
+        click(mounted.container, "Undo");
+        expect(result(mounted.container).state.doc.toString()).toBe(base);
+        unmount(mounted.root, mounted.container);
+    });
     it("debounces local and durable draft serialization until typing settles", async () => {
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
         const mounted = mount(<MergeWorkbench data={data} />);

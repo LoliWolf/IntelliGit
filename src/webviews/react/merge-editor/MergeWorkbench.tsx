@@ -14,6 +14,7 @@ import {
     VscEye,
     VscClose,
     VscLink,
+    VscLock,
 } from "react-icons/vsc";
 import type { MergeEditorData, OutboundMessage } from "./types";
 import { getVsCodeApi } from "../shared/vscodeApi";
@@ -159,6 +160,7 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
     ) => (
         <button
             type="button"
+            className="toolbar-icon-btn"
             title={t(key)}
             aria-label={t(key)}
             disabled={disabled}
@@ -171,7 +173,7 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
 
     return (
         <div
-            className="merge-workbench"
+            className="merge-editor merge-workbench"
             aria-busy={busy}
             style={
                 data.editorFontSize
@@ -181,84 +183,111 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     : undefined
             }
         >
-            <div className="mw-toolbar" role="toolbar">
-                {tool(
-                    "merge.toolbar.prevConflict.label",
-                    <VscChevronUp />,
-                    () => jump(active - 1),
-                    !hunks.length,
-                )}
-                {tool(
-                    "merge.toolbar.nextConflict.label",
-                    <VscChevronDown />,
-                    () => jump(active + 1),
-                    !hunks.length,
-                )}
-                <span className="mw-divider" />
-                {tool(
-                    "merge.workbench.undo",
-                    <VscDiscard />,
-                    () => {
-                        if (result) undo(result);
-                    },
-                    !result || !undoDepth(result.state) || busy,
-                )}
-                {tool(
-                    "merge.workbench.redo",
-                    <VscDebugRestart />,
-                    () => {
-                        if (result) redo(result);
-                    },
-                    !result || !redoDepth(result.state) || busy,
-                )}
-                {tool("merge.workbench.search", <VscSearch />, () => {
-                    if (result) openSearchPanel(result);
-                })}
-                {tool(
-                    "merge.workbench.base",
-                    <VscEye />,
-                    () => setBaseVisible(!baseVisible),
-                    false,
-                    baseVisible,
-                )}
-                {tool("merge.workbench.link", <VscLink />, () => setLinked(!linked), false, linked)}
-                <span className="mw-divider" />
-                {tool(
-                    "merge.workbench.takeOurs",
-                    <VscArrowRight />,
-                    () => resolve("ours"),
-                    !selected || busy,
-                )}
-                {tool(
-                    "merge.workbench.takeTheirs",
-                    <VscArrowLeft />,
-                    () => resolve("theirs"),
-                    !selected || busy,
-                )}
-                <select
-                    aria-label={t("merge.workbench.combine")}
-                    value=""
-                    disabled={!selected || busy}
-                    onChange={(event) => resolve(event.target.value as Choice)}
-                >
-                    <option value="" disabled>
-                        {t("merge.workbench.combine")}
-                    </option>
-                    <option value="both">{t("merge.workbench.oursThenTheirs")}</option>
-                    <option value="both-reversed">{t("merge.workbench.theirsThenOurs")}</option>
-                    <option value="base">{t("merge.workbench.keepBase")}</option>
-                    <option value="none">{t("merge.status.removeBlock")}</option>
-                </select>
-                {tool(
-                    "merge.workbench.markResolved",
-                    <VscCheck />,
-                    markResolved,
-                    !selected || busy,
-                    selected?.resolved ?? false,
-                )}
-                <span className="mw-status" role="status">
-                    {t("merge.status.unresolved", { count: pending })}
-                </span>
+            <div className="merge-toolbar mw-toolbar" role="toolbar">
+                <div className="toolbar-left">
+                    {tool(
+                        "merge.toolbar.prevConflict.label",
+                        <VscChevronUp />,
+                        () => jump(active - 1),
+                        !hunks.length,
+                    )}
+                    {tool(
+                        "merge.toolbar.nextConflict.label",
+                        <VscChevronDown />,
+                        () => jump(active + 1),
+                        !hunks.length,
+                    )}
+                    <span className="toolbar-separator" />
+                    {tool(
+                        "merge.workbench.undo",
+                        <VscDiscard />,
+                        () => {
+                            if (result) undo(result);
+                        },
+                        !result || !undoDepth(result.state) || busy,
+                    )}
+                    {tool(
+                        "merge.workbench.redo",
+                        <VscDebugRestart />,
+                        () => {
+                            if (result) redo(result);
+                        },
+                        !result || !redoDepth(result.state) || busy,
+                    )}
+                    {tool("merge.workbench.search", <VscSearch />, () => {
+                        if (result) openSearchPanel(result);
+                    })}
+                    {tool(
+                        "merge.workbench.base",
+                        <VscEye />,
+                        () => setBaseVisible(!baseVisible),
+                        false,
+                        baseVisible,
+                    )}
+                    {tool(
+                        "merge.workbench.link",
+                        <VscLink />,
+                        () => setLinked(!linked),
+                        false,
+                        linked,
+                    )}
+                    <span className="toolbar-separator" />
+                    {tool(
+                        "merge.workbench.takeOurs",
+                        <VscArrowRight />,
+                        () => resolve("ours"),
+                        !selected || busy,
+                    )}
+                    {tool(
+                        "merge.workbench.takeTheirs",
+                        <VscArrowLeft />,
+                        () => resolve("theirs"),
+                        !selected || busy,
+                    )}
+                    <select
+                        className="toolbar-select"
+                        aria-label={t("merge.workbench.combine")}
+                        value=""
+                        disabled={!selected || busy}
+                        onChange={(event) => resolve(event.target.value as Choice)}
+                    >
+                        <option value="" disabled>
+                            {t("merge.workbench.combine")}
+                        </option>
+                        <option value="both">{t("merge.workbench.oursThenTheirs")}</option>
+                        <option value="both-reversed">{t("merge.workbench.theirsThenOurs")}</option>
+                        <option value="base">{t("merge.workbench.keepBase")}</option>
+                        <option value="none">{t("merge.status.removeBlock")}</option>
+                    </select>
+                    {tool(
+                        "merge.workbench.markResolved",
+                        <VscCheck />,
+                        markResolved,
+                        !selected || busy,
+                        selected?.resolved ?? false,
+                    )}
+                    <select
+                        className="toolbar-select mw-hunks"
+                        aria-label={t("merge.count.changes", { count: hunks.length })}
+                        value={active}
+                        disabled={!hunks.length}
+                        onChange={(event) => jump(Number(event.target.value))}
+                    >
+                        {hunks.map((hunk, index) => (
+                            <option key={hunk.id} value={index}>
+                                {t("merge.workbench.change", { count: index + 1 })}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className="toolbar-right">
+                    <span
+                        className={`merge-remaining-status${pending === 0 ? " resolved" : ""}`}
+                        role="status"
+                    >
+                        {t("merge.status.unresolved", { count: pending })}
+                    </span>
+                </div>
             </div>
             {error && (
                 <div className="mw-error" role="alert">
@@ -275,10 +304,24 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     <button onClick={discardStaleDraft}>{t("merge.workbench.discardDraft")}</button>
                 </div>
             )}
-            <div className="mw-headings">
-                <span>{data.oursLabel}</span>
-                <span>{t("merge.workbench.result")}</span>
-                <span>{data.theirsLabel}</span>
+            <div className="pane-meta-row mw-headings">
+                <div className="pane-meta">
+                    <span className="pane-meta-label">
+                        <VscLock className="pane-lock" />
+                        {t("merge.pane.changesFrom", { label: data.oursLabel })}
+                    </span>
+                </div>
+                <div className="pane-meta pane-meta-center">
+                    <span title={data.filePath}>
+                        {t("merge.pane.result", { path: data.filePath })}
+                    </span>
+                </div>
+                <div className="pane-meta pane-meta-right">
+                    <span className="pane-meta-label">
+                        <VscLock className="pane-lock" />
+                        {t("merge.pane.changesFrom", { label: data.theirsLabel })}
+                    </span>
+                </div>
             </div>
             <div className="mw-panes">
                 {[0, 1, 2].map((pane) => (
@@ -290,10 +333,11 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                                 side={pane === 1 ? "ours" : "theirs"}
                                 busy={busy}
                                 accept={(index) => resolve(pane === 1 ? "ours" : "theirs", index)}
+                                discard={(index) => resolve("none", index)}
                             />
                         )}
                         <div
-                            className="mw-editor"
+                            className={`mw-editor col-${["left", "middle", "right"][pane]}`}
                             data-testid={`merge-editor-${pane}`}
                             key={pane}
                             ref={(element) => {
@@ -314,46 +358,48 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     }}
                 />
             </section>
-            <div className="mw-hunks" role="toolbar">
-                {hunks.map((hunk, index) => (
+            <footer className="merge-footer mw-footer">
+                <div className="footer-left">
                     <button
-                        key={hunk.id}
-                        className={index === active ? "active" : ""}
-                        onClick={() => jump(index)}
-                        aria-pressed={index === active}
+                        className="toolbar-icon-btn"
+                        title={t("merge.workbench.native")}
+                        aria-label={t("merge.workbench.native")}
+                        onClick={() => {
+                            flushDraft();
+                            getVsCodeApi<OutboundMessage>().postMessage({
+                                type: "openNativeMerge",
+                            });
+                        }}
                     >
-                        {hunk.resolved ? <VscCheck /> : <span className="mw-pending" />}{" "}
-                        {t("merge.workbench.change", { count: index + 1 })}
+                        <VscEye />
                     </button>
-                ))}
-            </div>
-            <footer className="mw-footer">
-                <button
-                    title={t("merge.workbench.native")}
-                    aria-label={t("merge.workbench.native")}
-                    onClick={() => {
-                        flushDraft();
-                        getVsCodeApi<OutboundMessage>().postMessage({ type: "openNativeMerge" });
-                    }}
-                >
-                    <VscEye />
-                </button>
-                <span>{data.filePath}</span>
-                <span>{saved ? t("merge.workbench.draftSaved") : ""}</span>
-                <button
-                    onClick={() => {
-                        flushDraft();
-                        getVsCodeApi<OutboundMessage>().postMessage({
-                            type: "openConflictSession",
-                        });
-                    }}
-                >
-                    {t("merge.workbench.files")}
-                </button>
-                <button onClick={close}>{t("common.cancel")}</button>
-                <button className="primary" disabled={pending > 0 || busy} onClick={apply}>
-                    {t("common.apply")}
-                </button>
+                    <span className="mw-draft-status">
+                        {saved ? t("merge.workbench.draftSaved") : ""}
+                    </span>
+                    <button
+                        className="footer-btn secondary ghost"
+                        onClick={() => {
+                            flushDraft();
+                            getVsCodeApi<OutboundMessage>().postMessage({
+                                type: "openConflictSession",
+                            });
+                        }}
+                    >
+                        {t("merge.workbench.files")}
+                    </button>
+                </div>
+                <div className="footer-right">
+                    <button className="footer-btn secondary" onClick={close}>
+                        {t("common.cancel")}
+                    </button>
+                    <button
+                        className="footer-btn primary"
+                        disabled={pending > 0 || busy}
+                        onClick={apply}
+                    >
+                        {t("common.apply")}
+                    </button>
+                </div>
             </footer>
         </div>
     );

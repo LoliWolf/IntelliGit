@@ -1,4 +1,11 @@
-import { Compartment, EditorState, StateEffect, StateField, type Range } from "@codemirror/state";
+import {
+    Compartment,
+    EditorState,
+    RangeSet,
+    StateEffect,
+    StateField,
+    type Range,
+} from "@codemirror/state";
 import {
     EditorView,
     keymap,
@@ -6,6 +13,8 @@ import {
     highlightActiveLine,
     drawSelection,
     Decoration,
+    GutterMarker,
+    gutterLineClass,
     ViewPlugin,
     type ViewUpdate,
     type DecorationSet,
@@ -16,6 +25,7 @@ import {
     replaceHunks,
     workbenchHunks,
     workbenchHistory,
+    workbenchChangeClass,
     type WorkbenchHunk,
 } from "./workbenchModel";
 import {
@@ -39,12 +49,12 @@ const palette = EditorView.theme({
         fontFamily: "var(--vscode-editor-font-family)",
         fontSize: "var(--vscode-editor-font-size)",
     },
-    ".cm-scroller": { overflow: "auto", fontFamily: "inherit", lineHeight: "1.6" },
-    ".cm-content": { padding: "8px 0", caretColor: "var(--vscode-editorCursor-foreground)" },
+    ".cm-scroller": { overflow: "auto", fontFamily: "inherit", lineHeight: "20px" },
+    ".cm-content": { padding: "0", caretColor: "var(--vscode-editorCursor-foreground)" },
     ".cm-gutters": {
         backgroundColor: "var(--vscode-editor-background)",
         color: "color-mix(in srgb, var(--vscode-editorLineNumber-foreground) 60%, var(--vscode-editor-foreground))",
-        borderRight: "1px solid var(--vscode-panel-border)",
+        borderRight: "1px solid var(--merge-pane-boundary)",
     },
     ".cm-activeLine, .cm-activeLineGutter": {
         backgroundColor: "var(--vscode-editor-lineHighlightBackground)",
@@ -68,10 +78,10 @@ const palette = EditorView.theme({
 export const setMergeSyntax = StateEffect.define<ShikiTheme>();
 
 /** Converts TextMate's font-style flags into inline token styles without changing editor text. */
-function tokenStyle(token: { color?: string; fontStyle?: number }): string {
+function tokenStyle(token: { color?: string; darkColor?: string; fontStyle?: number }): string {
     const flags = token.fontStyle ?? 0;
     return [
-        token.color ? `color:${token.color}` : "",
+        token.color ? `color:light-dark(${token.color},${token.darkColor ?? token.color})` : "",
         flags & 1 ? "font-style:italic" : "",
         flags & 2 ? "font-weight:bold" : "",
         flags & 4 ? "text-decoration:underline" : "",
@@ -149,7 +159,7 @@ const inputHunks = StateField.define<readonly WorkbenchHunk[]>({
 function wordDecorations(state: EditorState, hunks: readonly WorkbenchHunk[]): Range<Decoration>[] {
     const marks: Range<Decoration>[] = [];
     for (const hunk of hunks) {
-        if (!hunk.segment.baseLines.length) continue;
+        if ((hunk.conflict && hunk.resolved) || !hunk.segment.baseLines.length) continue;
         const text = state.doc.sliceString(hunk.from, hunk.to).replace(/\n$/, "");
         const lines = text.split("\n");
         const compared = alignCompareLinesForWordDiff(lines, hunk.segment.baseLines);
@@ -176,10 +186,16 @@ function wordDecorations(state: EditorState, hunks: readonly WorkbenchHunk[]): R
     return marks;
 }
 
-/** Rebuilds conflict decorations only when text or decision anchors change. */
-function conflictField(readOnly: boolean) {
-    return StateField.define<DecorationSet>({
-        create: () => Decoration.none,
+class ChangeGutterMarker extends GutterMarker {
+    constructor(readonly elementClass: string) {
+        super();
+    }
+}
+
+/** Paints complete code and gutter rows with the same bands as the retained renderer. */
+function conflictField(readOnly: boolean, side?: "ours" | "theirs") {
+    return StateField.define<{ lines: DecorationSet; gutters: RangeSet<GutterMarker> }>({
+        create: () => ({ lines: Decoration.none, gutters: RangeSet.of<GutterMarker>([]) }),
         update(value, transaction) {
             if (
                 !transaction.docChanged &&
@@ -188,26 +204,52 @@ function conflictField(readOnly: boolean) {
                 )
             )
                 return value;
-            const hunks = transaction.state.field(readOnly ? inputHunks : workbenchHunks);
-            return Decoration.set(
-                [
-                    ...hunks.flatMap((hunk) =>
-                        hunk.to > hunk.from
-                            ? [
-                                  Decoration.mark({
-                                      class: hunk.resolved
-                                          ? "merge-range-resolved"
-                                          : "merge-range-pending",
-                                  }).range(hunk.from, hunk.to),
-                              ]
-                            : [],
+            const hunks = transaction.state
+                .field(readOnly ? inputHunks : workbenchHunks)
+                .filter(
+                    (hunk) =>
+                        !(side === "ours" && hunk.segment.changeKind === "theirs-only") &&
+                        !(side === "theirs" && hunk.segment.changeKind === "ours-only"),
+                );
+            const rows = new Map<number, string>();
+            for (const hunk of hunks) {
+                if (hunk.to <= hunk.from) continue;
+                const first = transaction.state.doc.lineAt(hunk.from).number;
+                const last = transaction.state.doc.lineAt(hunk.to - 1).number;
+                for (let number = first; number <= last; number++)
+                    rows.set(
+                        transaction.state.doc.line(number).from,
+                        [
+                            workbenchChangeClass(hunk),
+                            number === first ? "merge-range-start" : "",
+                            number === last ? "merge-range-end" : "",
+                        ]
+                            .filter(Boolean)
+                            .join(" "),
+                    );
+            }
+            return {
+                lines: Decoration.set(
+                    [
+                        ...Array.from(rows, ([from, className]) =>
+                            Decoration.line({ class: className }).range(from),
+                        ),
+                        ...wordDecorations(transaction.state, hunks),
+                    ],
+                    true,
+                ),
+                gutters: RangeSet.of(
+                    Array.from(rows, ([from, className]) =>
+                        new ChangeGutterMarker(className).range(from),
                     ),
-                    ...wordDecorations(transaction.state, hunks),
-                ],
-                true,
-            );
+                    true,
+                ),
+            };
         },
-        provide: (field) => EditorView.decorations.from(field),
+        provide: (field) => [
+            EditorView.decorations.from(field, (value) => value.lines),
+            gutterLineClass.from(field, (value) => value.gutters),
+        ],
     });
 }
 
@@ -220,6 +262,7 @@ export function createMergeCodeEditor(
         filePath: string;
         label: string;
         theme: ShikiTheme;
+        side?: "ours" | "theirs";
         update?: (view: EditorView) => void;
     },
 ): { view: EditorView; setReadOnly: (readOnly: boolean) => void } {
@@ -241,7 +284,7 @@ export function createMergeCodeEditor(
             ]),
             EditorView.contentAttributes.of({ "aria-label": options.label }),
             ...(options.readOnly ? [inputHunks] : [history(), workbenchHunks, workbenchHistory]),
-            conflictField(options.readOnly),
+            conflictField(options.readOnly, options.side),
             EditorView.updateListener.of((update) => {
                 if (
                     update.docChanged ||
