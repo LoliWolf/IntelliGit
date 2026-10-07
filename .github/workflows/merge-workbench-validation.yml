@@ -35,6 +35,19 @@ jobs:
             - name: Build the committed final baselines in the digest-pinned renderer
               run: >-
                   ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build'
+            - name: Regenerate only the four intentionally changed merge screenshots
+              run: >-
+                  ./tests/e2e/docker/run.sh 'UPDATE_VISUAL_BASELINE=1 bun run test:visual
+                  --grep "merge-editor matches the pixel baseline" --update-snapshots'
+            - name: Verify the scoped baseline diff
+              run: |
+                  node -e '
+                  const {execFileSync}=require("node:child_process");
+                  const paths=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n");
+                  const expected=/^tests\/visual\/__screenshots__\/pixelBaselines\.spec\.ts\/pixel-baseline-screenshots-merge-editor-matches-the-pixel-baseline-1-(dark|light)-modern-(narrow|wide)\.png$/;
+                  if(paths.length!==4 || paths.some(p=>!expected.test(p))) throw new Error("Unexpected visual diff: "+JSON.stringify(paths));
+                  console.log(JSON.stringify({sourceCommit:"89da2790b8e1583d4dd6a64dfbceabea95764600",changedBaselines:paths}));
+                  '
             - name: Compare the complete visual matrix without update mode
               run: ./tests/e2e/docker/run.sh 'bun run test:visual'
             - name: Real Linux VS Code full workflows and Diff regression
