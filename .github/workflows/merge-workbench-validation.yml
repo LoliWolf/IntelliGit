@@ -52,10 +52,13 @@ jobs:
                   assert.deepStrictEqual({...observedEnvironment,osRelease:expectedEnvironment.osRelease},expectedEnvironment);
                   console.log(JSON.stringify({environmentInputs:"unchanged",observedKernel:observedEnvironment.osRelease,committedKernel:expectedEnvironment.osRelease}));
                   fs.writeFileSync(environmentPath,committed);
-                  const paths=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n");
+                  const paths=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);
                   const expected=/^tests\/visual\/__screenshots__\/pixelBaselines\.spec\.ts\/pixel-baseline-screenshots-merge-editor-matches-the-pixel-baseline-1-(dark|light)-modern-(narrow|wide)\.png$/;
-                  if(paths.length!==4 || paths.some(p=>!expected.test(p))) throw new Error("Unexpected visual diff: "+JSON.stringify(paths));
-                  console.log(JSON.stringify({sourceCommit:"f67fbd334d4a4bce75c89a4b77dfccb999f8d928",changedBaselines:paths}));
+                  if(paths.some(p=>!expected.test(p))) throw new Error("Unexpected visual diff: "+JSON.stringify(paths));
+                  const baselineDir="tests/visual/__screenshots__/pixelBaselines.spec.ts";
+                  const baselines=fs.readdirSync(baselineDir).map(p=>`${baselineDir}/${p}`).filter(p=>expected.test(p));
+                  assert.equal(baselines.length,4);
+                  console.log(JSON.stringify({sourceCommit:"f67fbd334d4a4bce75c89a4b77dfccb999f8d928",generatedBaselines:baselines,changedBaselines:paths}));
                   '
             - name: Validate merge layout, scrolling and non-pixel oracles before export
               run: >-
