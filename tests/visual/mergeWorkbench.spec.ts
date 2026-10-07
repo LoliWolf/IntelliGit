@@ -89,6 +89,10 @@ test("workbench retains the existing merge diff-area design", async ({
         "background-color",
         "rgb(75, 21, 21)",
     );
+    await expect(left.locator(".cm-gutterElement.merge-range-pending").first()).toHaveCSS(
+        "color",
+        "rgb(171, 178, 191)",
+    );
     const actions = page.locator(".mw-connectors-ours .mw-actions").first();
     await expect(actions.locator(".accept-btn")).toHaveCSS("color", "rgb(102, 187, 106)");
     await expect(actions.locator(".discard-btn")).toHaveCSS("color", "rgb(251, 31, 73)");
