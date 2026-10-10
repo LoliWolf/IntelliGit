@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-10
+
 ### Added
 
 - Git conflicts open a full-document three-way merge workbench with immutable input panes, inline accept controls, linked change ribbons, base inspection, search, ordered combination choices, and shared undo/redo for decisions and manual edits. Drafts survive closing and reopening, and follow the current VS Code theme.
