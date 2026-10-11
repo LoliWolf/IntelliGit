@@ -136,8 +136,12 @@ export class IntelliGitView {
     /** Returns the full-document merge workbench opened by a conflict row. */
     public async revealMergeWorkbench(
         timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS,
+        filePath?: string,
     ): Promise<FrameLocator> {
-        return this.frameOwning(".merge-editor.workbench", timeoutMs);
+        const marker = filePath
+            ? `.merge-editor.workbench:has(.pane-meta-center [title=${JSON.stringify(filePath)}])`
+            : ".merge-editor.workbench";
+        return this.frameOwning(marker, timeoutMs);
     }
 
     /** Returns the repository-scoped conflict chooser. */

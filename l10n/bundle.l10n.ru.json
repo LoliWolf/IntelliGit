@@ -1,4 +1,6 @@
 {
+    "Base": "База",
+    "Result": "Результат",
     "No Git repositories found in this workspace.": "В этой рабочей области не найдено репозиториев Git.",
     "Select a repository for shelf changes": "Выберите хранилище для изменений полки",
     "Shelf service is unavailable for this repository.": "Служба полок недоступна для этого репозитория.",

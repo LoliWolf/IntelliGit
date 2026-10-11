@@ -3,6 +3,94 @@ const MERGE_CHOICES = ["ours", "theirs", "both", "both-reversed", "base", "none"
 /** Available replacements for a merge hunk. */
 export type MergeChoice = (typeof MERGE_CHOICES)[number];
 
+/** Presentation preferences never change the saved merge result. */
+export interface MergeViewSettings {
+    navigation: "conflicts" | "changes" | "unresolved" | "automatic";
+    advance: boolean;
+    wrap: boolean;
+    collapse: boolean;
+    contextLines: number;
+    highlight: "line" | "word" | "character";
+}
+
+/** File-local cursor and reading state restored with a matching immutable snapshot. */
+export interface MergeViewState {
+    settings: MergeViewSettings;
+    activeId: number | null;
+    anchor: number;
+    head: number;
+    scrollTop: number;
+    scrollLeft: number;
+}
+
+/** Preserves the classic editor's initial appearance and navigation policy. */
+export const DEFAULT_MERGE_VIEW_SETTINGS: MergeViewSettings = {
+    navigation: "conflicts",
+    advance: false,
+    wrap: false,
+    collapse: false,
+    contextLines: 3,
+    highlight: "word",
+};
+
+/** Discards invalid optional presentation metadata without losing a valid text draft. */
+export function parseMergeViewState(value: unknown, length: number): MergeViewState | null {
+    if (!value || typeof value !== "object") return null;
+    const source = value as Record<string, unknown>;
+    const settings = source.settings as Record<string, unknown> | undefined;
+    if (
+        !settings ||
+        typeof settings !== "object" ||
+        typeof settings.navigation !== "string" ||
+        typeof settings.highlight !== "string" ||
+        !["conflicts", "changes", "unresolved", "automatic"].includes(
+            String(settings.navigation),
+        ) ||
+        !["line", "word", "character"].includes(String(settings.highlight)) ||
+        typeof settings.advance !== "boolean" ||
+        typeof settings.wrap !== "boolean" ||
+        typeof settings.collapse !== "boolean" ||
+        typeof settings.contextLines !== "number" ||
+        !Number.isSafeInteger(settings.contextLines) ||
+        settings.contextLines < 0 ||
+        settings.contextLines > 20 ||
+        (source.activeId !== null &&
+            (typeof source.activeId !== "number" ||
+                !Number.isSafeInteger(source.activeId) ||
+                source.activeId < 0)) ||
+        !["anchor", "head"].every(
+            (key) =>
+                typeof source[key] === "number" &&
+                Number.isSafeInteger(source[key]) &&
+                source[key] >= 0 &&
+                source[key] <= length,
+        ) ||
+        !["scrollTop", "scrollLeft"].every(
+            (key) =>
+                typeof source[key] === "number" &&
+                Number.isFinite(source[key]) &&
+                source[key] >= 0 &&
+                source[key] <= 1_000_000_000,
+        )
+    )
+        return null;
+    return {
+        settings: {
+            navigation: settings.navigation as MergeViewSettings["navigation"],
+            highlight: settings.highlight as MergeViewSettings["highlight"],
+            advance: settings.advance,
+            wrap: settings.wrap,
+            collapse: settings.collapse,
+            contextLines: settings.contextLines,
+        },
+        activeId: source.activeId,
+        anchor: source.anchor as number,
+        head: source.head as number,
+        scrollTop: source.scrollTop as number,
+        scrollLeft: source.scrollLeft as number,
+    };
+}
+
 /** Persisted result text and decisions, owned by one immutable conflict snapshot. */
 export interface MergeDraft {
     snapshotId: string;
@@ -16,8 +104,10 @@ export interface MergeDraft {
         edited?: boolean;
         dismissedOurs?: boolean;
         dismissedTheirs?: boolean;
+        reviewed?: boolean;
     }>;
     ignoreWhitespace?: boolean;
+    view?: MergeViewState;
 }
 
 /** Accepts absent values and booleans without treating null as absent. */
@@ -48,9 +138,9 @@ function parseMergeDraftHunk(
         entry.to > contentLength ||
         typeof entry.resolved !== "boolean" ||
         (entry.decision !== undefined && !MERGE_CHOICES.includes(entry.decision as MergeChoice)) ||
-        !isOptionalBoolean(entry.edited) ||
-        !isOptionalBoolean(entry.dismissedOurs) ||
-        !isOptionalBoolean(entry.dismissedTheirs)
+        !["edited", "dismissedOurs", "dismissedTheirs", "reviewed"].every((key) =>
+            isOptionalBoolean(entry[key]),
+        )
     )
         return null;
     return {
@@ -59,9 +149,12 @@ function parseMergeDraftHunk(
         to: entry.to,
         resolved: entry.resolved,
         ...(entry.decision !== undefined ? { decision: entry.decision as MergeChoice } : {}),
-        ...(entry.edited !== undefined ? { edited: entry.edited } : {}),
-        ...(entry.dismissedOurs !== undefined ? { dismissedOurs: entry.dismissedOurs } : {}),
-        ...(entry.dismissedTheirs !== undefined ? { dismissedTheirs: entry.dismissedTheirs } : {}),
+        ...(typeof entry.edited === "boolean" ? { edited: entry.edited } : {}),
+        ...(typeof entry.dismissedOurs === "boolean" ? { dismissedOurs: entry.dismissedOurs } : {}),
+        ...(typeof entry.dismissedTheirs === "boolean"
+            ? { dismissedTheirs: entry.dismissedTheirs }
+            : {}),
+        ...(typeof entry.reviewed === "boolean" ? { reviewed: entry.reviewed } : {}),
     };
 }
 
@@ -89,6 +182,7 @@ export function parseMergeDraft(value: unknown): MergeDraft | null {
         ids.add(entry.id);
         previous = entry.to;
     }
+    const view = parseMergeViewState(source.view, source.content.length);
     return {
         snapshotId: source.snapshotId,
         content: source.content,
@@ -96,6 +190,7 @@ export function parseMergeDraft(value: unknown): MergeDraft | null {
         ...(source.ignoreWhitespace !== undefined
             ? { ignoreWhitespace: source.ignoreWhitespace }
             : {}),
+        ...(view ? { view } : {}),
     };
 }
 
@@ -104,11 +199,21 @@ export type MergeWorkbenchOutbound =
     | { type: "loadMergeDraft" }
     | { type: "saveMergeDraft"; draft: MergeDraft; revision: number }
     | { type: "discardMergeDraft"; snapshotId: string }
-    | { type: "applyResolution"; content: string; snapshotId: string };
+    | { type: "applyResolution"; content: string; snapshotId: string; openNext?: boolean }
+    | {
+          type: "compareMergeVersion";
+          snapshotId: string;
+          side: "ours" | "theirs" | "result";
+          content?: string;
+      }
+    | { type: "loadMergeFiles" }
+    | { type: "openMergeFile"; filePath: string }
+    | { type: "reviewMergeFile"; filePath: string };
 
 /** Apply failures leave the editable document mounted and its history intact. */
 export type MergeWorkbenchInbound =
     | { type: "mergeDraft"; draft: MergeDraft | null }
     | { type: "mergeDraftSaved"; revision: number }
     | { type: "resolutionError"; message: string }
-    | { type: "resolutionApplied" };
+    | { type: "resolutionApplied" }
+    | { type: "mergeFileQueue"; files: Array<{ path: string; resolved: boolean }> };

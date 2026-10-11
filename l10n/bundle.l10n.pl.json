@@ -1,4 +1,6 @@
 {
+    "Base": "Podstawa",
+    "Result": "Wynik",
     "No Git repositories found in this workspace.": "W tym obszarze roboczym nie znaleziono repozytoriów Git.",
     "Select a repository for shelf changes": "Wybierz repozytorium zmian na półkach",
     "Shelf service is unavailable for this repository.": "Usługa półek nie jest dostępna dla tego repozytorium.",

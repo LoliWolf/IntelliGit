@@ -17,6 +17,7 @@ export type MergePaneId = (typeof MERGE_PANES)[number];
 interface ResultSlice {
     top: number;
     count: number;
+    pixels?: { top: number; height: number };
 }
 
 /** One divider side of a hunk's connector: color, settled state, and target. */
@@ -109,6 +110,10 @@ function sliceExtent(
     slice: ResultSlice | undefined,
 ): { top: number; bot: number } {
     if (!slice) return { top: midTop, bot: midBot };
+    if (slice.pixels) {
+        const top = midTop + slice.pixels.top;
+        return { top, bot: top + slice.pixels.height };
+    }
     const top = midTop + slice.top * LINE_HEIGHT_PX;
     return { top, bot: top + slice.count * LINE_HEIGHT_PX };
 }

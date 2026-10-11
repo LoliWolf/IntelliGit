@@ -14,7 +14,7 @@ import {
     type MergeEditorData,
     type ConflictSegment,
 } from "../../../mergeEditor/conflictParser";
-import type { MergeChoice, MergeDraft } from "../../protocol/mergeWorkbench";
+import type { MergeChoice, MergeDraft, MergeViewSettings } from "../../protocol/mergeWorkbench";
 import { getResultLines, isTrueConflict } from "./mergeState";
 
 /** Available replacements for a merge hunk. */
@@ -60,6 +60,7 @@ export interface WorkbenchHunk {
     resolved: boolean;
     decision?: MergeChoice;
     edited: boolean;
+    reviewed?: boolean;
     dismissed: { ours: boolean; theirs: boolean };
     conflict: boolean;
     segment: ConflictSegment;
@@ -219,6 +220,34 @@ export function conflictHunkIndices(hunks: readonly WorkbenchHunk[]) {
     return { conflictIndices, unresolvedIndices };
 }
 
+/** Uses source-order navigation even when the active hunk is outside the current filter. */
+export function navigationIndices(
+    hunks: readonly WorkbenchHunk[],
+    mode: MergeViewSettings["navigation"],
+): number[] {
+    return hunks.flatMap((hunk, index) =>
+        mode === "changes" ||
+        (mode === "conflicts" && hunk.conflict) ||
+        (mode === "unresolved" && hunk.conflict && !hunk.resolved) ||
+        (mode === "automatic" && hunk.segment.autoResolvedLines !== undefined)
+            ? [index]
+            : [],
+    );
+}
+
+/** Wraps a filtered sequence without losing the active hunk's source-order position. */
+export function nextNavigationIndex(
+    indices: readonly number[],
+    active: number | null,
+    delta: -1 | 1,
+): number | undefined {
+    if (!indices.length) return undefined;
+    if (active === null) return delta > 0 ? indices[0] : indices.at(-1);
+    return delta > 0
+        ? (indices.find((index) => index > active) ?? indices[0])
+        : ([...indices].reverse().find((index) => index < active) ?? indices.at(-1));
+}
+
 /** Keeps a selection in common text, then uses the legacy editor's default conflict. */
 export function resolveActiveHunk(
     hunks: readonly WorkbenchHunk[],
@@ -274,6 +303,7 @@ export function bulkResolve(
             decision: choice,
             resolved: true,
             edited: false,
+            reviewed: target.segment.autoResolvedLines !== undefined ? true : target.reviewed,
             dismissed: choice === "none" ? { ours: false, theirs: false } : target.dismissed,
         };
     });
@@ -327,6 +357,7 @@ export function restoreDraftHunks(
             resolved: entry.resolved,
             ...(entry.decision !== undefined ? { decision: entry.decision } : {}),
             edited: entry.edited ?? false,
+            ...(entry.reviewed !== undefined ? { reviewed: entry.reviewed } : {}),
             dismissed: {
                 ours: entry.dismissedOurs ?? false,
                 theirs: entry.dismissedTheirs ?? false,

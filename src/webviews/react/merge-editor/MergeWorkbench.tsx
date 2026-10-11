@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
 import type { MergeEditorData } from "./types";
-import { buildWorkbenchDocument, resolveActiveHunk } from "./workbenchModel";
+import { buildWorkbenchDocument, resolveActiveHunk, navigationIndices } from "./workbenchModel";
 import { useWorkbenchCommands } from "./useWorkbenchCommands";
 import { useWorkbenchKeyboard } from "./useWorkbenchKeyboard";
 import type { HunkActionCallbacks } from "./workbenchGutter";
@@ -21,6 +21,13 @@ import { MERGE_PANES } from "./mergeRibbons";
 import { ConnectorLayer, OverviewRail } from "./segments";
 import { scrollRangePx } from "../diff-core/mergeScrollLayout";
 import { t } from "../shared/i18n";
+import { useWorkbenchReading } from "./useWorkbenchReading";
+import { WorkbenchFlowOptions, WorkbenchFileQueue } from "./WorkbenchFlow";
+import {
+    useWorkbenchViewState,
+    useWorkbenchViewPersistence,
+    useMergeFileQueue,
+} from "./useWorkbenchViewState";
 import "./merge-workbench.css";
 
 /** Full-document three-way merge with reversible decisions and immutable inputs. */
@@ -35,6 +42,9 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
     const scrollHandler = useRef<WorkbenchScrollHandler | null>(null);
     const layoutFrame = useRef<(() => void) | null>(null);
     const keymap = useRef<WorkbenchKeyCommands | null>(null);
+    const viewContext = useWorkbenchViewState();
+    const { settings, presentation, restoreView } = viewContext;
+    const [showOptions, setShowOptions] = useState(false);
     const {
         data,
         hosts,
@@ -52,17 +62,26 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
         flushDraft,
         isPristine,
         regroup,
+        savePresentation,
     } = useWorkbenchEditors(inputData, initial, active, actions, {
         findHost,
         scrollHandler,
         layout: layoutFrame,
         keymap,
         onActiveFromCaret: setActive,
+        presentation,
+        restoreView,
     });
     const [baseVisible, setBaseVisible] = useState(false);
-    const [highlightWords, setHighlightWords] = useState(true);
+    const highlightWords = settings.highlight !== "line";
     const [showDetails, setShowDetails] = useState(false);
     const regroupNotice = useRegroupNotice(grouping, isPristine, regroup);
+    const workbenchLayout = useWorkbenchLayout(
+        editors,
+        hunks,
+        settings.wrap || settings.collapse,
+        settings.wrap,
+    );
     const {
         layout,
         markers,
@@ -78,7 +97,18 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
         handleScrollRequest,
         connectorSpecs,
         registerPath,
-    } = useWorkbenchLayout(editors, hunks);
+    } = workbenchLayout;
+    useWorkbenchReading(editors, hunks, settings);
+    const { changeSettings, rememberScroll } = useWorkbenchViewPersistence(
+        viewContext,
+        editors,
+        hunks,
+        active,
+        workbenchLayout,
+        savePresentation,
+        editorStats,
+    );
+    const { showFiles, files, toggleFiles, openFile } = useMergeFileQueue(flushDraft);
     useLayoutEffect(() => {
         scrollHandler.current = handleScrollRequest;
         layoutFrame.current = onScroll;
@@ -98,6 +128,7 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
         setActive,
         actions,
         jumpTo,
+        settings,
     });
     useWorkbenchKeyboard(hunks, commands, keymap);
     const rootStyle = {
@@ -116,6 +147,7 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                 "workbench",
                 highlightWords ? "words-highlighted" : "",
                 showDetails ? "details-expanded" : "",
+                settings.wrap ? "soft-wrap" : "",
             ]
                 .filter(Boolean)
                 .join(" ")}
@@ -143,11 +175,33 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     onSearch={commands.search}
                     onToggleBase={() => setBaseVisible(!baseVisible)}
                     onMarkResolved={commands.markResolved}
-                    onToggleWords={() => setHighlightWords(!highlightWords)}
+                    onToggleWords={() =>
+                        changeSettings({ highlight: highlightWords ? "line" : "word" })
+                    }
                     onToggleDetails={() => setShowDetails(!showDetails)}
                     onApplyNonConflicting={commands.applyNonConflicting}
                     onAcceptAll={commands.acceptAll}
                     onResolve={commands.resolve}
+                    navigationCount={navigationIndices(hunks, settings.navigation).length}
+                    showOptions={showOptions}
+                    onToggleOptions={() => setShowOptions(!showOptions)}
+                />
+            )}
+            {showOptions && (
+                <WorkbenchFlowOptions
+                    settings={settings}
+                    onChange={changeSettings}
+                    automatic={commands.selected?.segment.autoResolvedLines !== undefined}
+                    reviewed={commands.selected?.reviewed === true}
+                    onReview={commands.reviewAutomatic}
+                />
+            )}
+            {showFiles && (
+                <WorkbenchFileQueue
+                    files={files}
+                    current={data.filePath}
+                    busy={busy}
+                    onOpen={openFile}
                 />
             )}
             <WorkbenchDetails
@@ -193,8 +247,11 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                 <div
                     className="merge-content"
                     ref={contentRef}
-                    onScroll={onScroll}
-                    onWheel={onWheel}
+                    onScroll={() => {
+                        onScroll();
+                        rememberScroll();
+                    }}
+                    onWheel={settings.wrap ? undefined : onWheel}
                 >
                     <div className="merge-viewport" ref={viewportRef}>
                         {MERGE_PANES.map((pane, index) => (
@@ -228,7 +285,10 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     ref={horizontalRef}
                     className="merge-horizontal-scroll"
                     aria-hidden="true"
-                    onScroll={onHorizontalScroll}
+                    onScroll={() => {
+                        onHorizontalScroll();
+                        rememberScroll();
+                    }}
                 >
                     <div ref={horizontalInnerRef} className="merge-horizontal-scroll-inner" />
                 </div>
@@ -244,13 +304,14 @@ export function MergeWorkbench({ data: inputData }: { data: MergeEditorData }) {
                     hosts.current[3] = element;
                 }}
                 onClose={() => setBaseVisible(false)}
+                onCompare={data.sessionKind !== "shelf" ? commands.compare : undefined}
             />
             <WorkbenchFooter
                 isShelfSession={data.sessionKind === "shelf"}
                 saved={saved}
                 canApply={pending === 0 && !busy}
                 onAbort={commands.abort}
-                onOpenConflictSession={commands.openConflictSession}
+                onOpenConflictSession={toggleFiles}
                 onUseFile={commands.useFile}
                 onClose={commands.close}
                 onApply={commands.apply}

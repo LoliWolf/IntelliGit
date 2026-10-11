@@ -1,9 +1,11 @@
 import type { Text } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import type { DiffVerticalLayout, SegmentPaneLines } from "../diff-core/mergeScrollLayout";
 import { connectorSideSpecs, type ConnectorRenderSpec, type MergePaneId } from "./mergeRibbons";
 import type { OverviewMarker } from "./segments";
 import type { Grouping, WorkbenchHunk } from "./workbenchModel";
 import { resolutionOf, rowsInRange } from "./workbenchRows";
+import { LINE_HEIGHT_PX } from "../diff-core/mergeScrollLayout";
 
 /** Keeps ribbons aligned to current hunk rows; manual edits supersede prior side slices. */
 export function workbenchConnectors(
@@ -86,6 +88,86 @@ export function layoutSegments(
         throw new Error("merge-editor: current hunks are missing layout segments");
     return { paneLines, canonicalLineCount, startLine };
 }
+
+/** Measures wrapped and folded blocks through CodeMirror's public geometry, not DOM row guesses. */
+export function measuredLayoutSegments(
+    segments: Grouping["segments"],
+    hunks: readonly WorkbenchHunk[],
+    views: readonly EditorView[],
+) {
+    const info = layoutSegments(segments, hunks, views[1].state.doc);
+    const starts = [0, 0, 0];
+    let hunkIndex = 0;
+    const paneLines = segments.map((segment, index) => {
+        const hunk = segment.type === "conflict" ? hunks[hunkIndex++] : undefined;
+        const ends = hunk
+            ? [hunk.oursTo, hunk.to, hunk.theirsTo]
+            : [
+                  hunks[hunkIndex]?.oursFrom ?? views[0].state.doc.length,
+                  hunks[hunkIndex]?.from ?? views[1].state.doc.length,
+                  hunks[hunkIndex]?.theirsFrom ?? views[2].state.doc.length,
+              ];
+        if (hunk) {
+            starts[0] = hunk.oursFrom;
+            starts[1] = hunk.from;
+            starts[2] = hunk.theirsFrom;
+        }
+        const heights = views.map((view, pane) => {
+            if (ends[pane] <= starts[pane]) return 0;
+            const first = view.lineBlockAt(starts[pane]);
+            const last = view.lineBlockAt(ends[pane] - 1);
+            return Math.max(0, last.bottom - first.top) / LINE_HEIGHT_PX;
+        });
+        starts.splice(0, 3, ...ends);
+        return {
+            ...info.paneLines[index],
+            paneLines: { left: heights[0], middle: heights[1], right: heights[2] },
+        };
+    });
+    const canonicalLineCount = paneLines.map((item) => Math.max(...Object.values(item.paneLines)));
+    let line = 1;
+    const startLine = canonicalLineCount.map((count) => {
+        const start = line;
+        line += count;
+        return start;
+    });
+    return { paneLines, canonicalLineCount, startLine };
+}
+
+/** Resolves stacked and append-edge targets from rendered blocks when rows wrap. */
+export function measuredWorkbenchConnectors(
+    connectors: readonly ConnectorRenderSpec[],
+    hunks: readonly WorkbenchHunk[],
+    view: EditorView,
+): ConnectorRenderSpec[] {
+    const byId = new Map(hunks.map((hunk) => [hunk.id, hunk]));
+    return connectors.map((connector) => {
+        const hunk = byId.get(connector.id)!;
+        const firstLine = view.state.doc.lineAt(hunk.from).number;
+        const origin = view.lineBlockAt(hunk.from).top;
+        const edge = (offset: number) => {
+            const number = firstLine + offset;
+            return number <= view.state.doc.lines
+                ? view.lineBlockAt(view.state.doc.line(number).from).top - origin
+                : view.lineBlockAt(view.state.doc.length).bottom - origin;
+        };
+        const measured = { ...connector };
+        for (const side of ["left", "right"] as const) {
+            const spec = connector[side];
+            if (!spec?.midSlice) continue;
+            const top = edge(spec.midSlice.top);
+            measured[side] = {
+                ...spec,
+                midSlice: {
+                    ...spec.midSlice,
+                    pixels: { top, height: edge(spec.midSlice.top + spec.midSlice.count) - top },
+                },
+            };
+        }
+        return measured;
+    });
+}
+
 /** Maps a pane position back into the canonical space. */
 export function canonicalForPaneY(
     layout: DiffVerticalLayout<MergePaneId>,

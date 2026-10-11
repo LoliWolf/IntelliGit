@@ -22,13 +22,15 @@ import {
     drawRibbons,
     requirePxVar,
 } from "./mergeRibbons";
-import { groupingField, type WorkbenchHunk } from "./workbenchModel";
+import { groupingField, workbenchHunks, type WorkbenchHunk } from "./workbenchModel";
 import {
     layoutSegments,
     overviewMarkers,
     canonicalForPaneY,
     horizontalInnerWidth,
     workbenchConnectors,
+    measuredLayoutSegments,
+    measuredWorkbenchConnectors,
 } from "./workbenchLayout";
 import type { ConnectorSpec, OverviewMarker } from "./segments";
 import type { WorkbenchScrollHandler } from "./codeEditor";
@@ -110,10 +112,38 @@ function sameRibbonSpans(
     );
 }
 
+function sameSlices(a: readonly ConnectorRenderSpec[], b: readonly ConnectorRenderSpec[]) {
+    return (
+        a.length === b.length &&
+        a.every((item, index) =>
+            (["left", "right"] as const).every((side) => {
+                const old = item[side]?.midSlice?.pixels;
+                const next = b[index][side]?.midSlice?.pixels;
+                return old?.top === next?.top && old?.height === next?.height;
+            }),
+        )
+    );
+}
+
+function revealWrappedCaret(content: HTMLElement, view: EditorView, head: number) {
+    const position = view.domAtPos(head, -1);
+    const range = view.dom.ownerDocument.createRange();
+    range.setStart(position.node, position.offset);
+    range.collapse(true);
+    const caret = range.getClientRects()[0];
+    if (!caret) return;
+    const viewport = content.getBoundingClientRect();
+    if (caret.left < viewport.left + 12) content.scrollLeft += caret.left - viewport.left - 12;
+    else if (caret.right > viewport.right - 24)
+        content.scrollLeft += caret.right - viewport.right + 24;
+}
+
 /** Drives the workbench's single vertical scroller and translated editor columns. */
 export function useWorkbenchLayout(
     editors: MutableRefObject<Array<{ view: EditorView }>>,
     hunks: readonly WorkbenchHunk[],
+    dynamic = false,
+    wrap = false,
 ) {
     const contentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +163,7 @@ export function useWorkbenchLayout(
     const connectorsRef = useRef<ConnectorRenderSpec[]>([]);
     const spansRef = useRef<ReturnType<typeof measureRibbonSpans>>(null);
     const ribbonMeasureKey = useRef({});
+    const geometryMeasureKey = useRef({});
     const paths = useMemo(() => new Map<string, SVGPathElement>(), []);
     const registerPath = useCallback(
         (key: string, el: SVGPathElement | null) => {
@@ -159,12 +190,63 @@ export function useWorkbenchLayout(
         [editors],
     );
 
-    const drawFrameNow = useCallback(() => {
+    const drawFrameNow = useCallback((): void => {
         const content = contentRef.current;
         if (!content) return;
         const offsets = paneOffsetsForCanonical(layoutRef.current, MERGE_PANES, content.scrollTop);
         applyPaneOffsets(MERGE_PANES, (pane) => columnRefs.current[pane], offsets);
         const panes = editors.current.slice(0, 3);
+        if (dynamic && panes.length === 3) {
+            panes[0].view.requestMeasure({
+                key: geometryMeasureKey,
+                read: () => {
+                    const state = panes[1].view.state;
+                    return measuredLayoutSegments(
+                        state.field(groupingField).segments,
+                        state.field(workbenchHunks),
+                        panes.map(({ view }) => view),
+                    );
+                },
+                write: (info) => {
+                    const next = buildVerticalLayout(info.paneLines, MERGE_PANES);
+                    const old = layoutRef.current;
+                    const connectors = measuredWorkbenchConnectors(
+                        connectorsRef.current,
+                        panes[1].view.state.field(workbenchHunks),
+                        panes[1].view,
+                    );
+                    const slicesMatch = sameSlices(connectorsRef.current, connectors);
+                    connectorsRef.current = connectors;
+                    if (
+                        slicesMatch &&
+                        MERGE_PANES.every(
+                            (pane) =>
+                                next.paneHPx[pane].length === old.paneHPx[pane].length &&
+                                next.paneHPx[pane].every(
+                                    (height, index) =>
+                                        Math.abs(height - old.paneHPx[pane][index]) < 0.1,
+                                ),
+                        )
+                    )
+                        return;
+                    layoutRef.current = next;
+                    setGeometry((previous) => ({
+                        ...previous,
+                        layout: next,
+                        markers: overviewMarkers(
+                            panes[1].view.state.field(workbenchHunks),
+                            info,
+                            null,
+                        ),
+                    }));
+                    if (!frameRef.current)
+                        frameRef.current = requestAnimationFrame(() => {
+                            frameRef.current = 0;
+                            drawFrameNow();
+                        });
+                },
+            });
+        }
         const bar = horizontalRef.current;
         const inner = horizontalInnerRef.current;
         if (!bar || !inner) throw new Error("merge-workbench: horizontal bar is missing");
@@ -233,7 +315,7 @@ export function useWorkbenchLayout(
         }
         resetScroll(viewportRef.current);
         MERGE_PANES.forEach((pane) => resetScroll(columnRefs.current[pane]));
-    }, [editors, syncHorizontal, paths]);
+    }, [editors, syncHorizontal, paths, dynamic]);
 
     const handleScrollRequest = useCallback<WorkbenchScrollHandler>(
         (pane, view, range, _scrollOptions) => {
@@ -249,10 +331,13 @@ export function useWorkbenchLayout(
                     view.lineBlockAt(range.head).top,
                     viewportHRef.current,
                 );
-                const left = horizontalPosition(view, range.head, bar.scrollLeft);
-                if (left !== null) {
-                    requestedHorizontal.current = left;
-                    syncHorizontal(left);
+                if (wrap) revealWrappedCaret(content, view, range.head);
+                else {
+                    const left = horizontalPosition(view, range.head, bar.scrollLeft);
+                    if (left !== null) {
+                        requestedHorizontal.current = left;
+                        syncHorizontal(left);
+                    }
                 }
                 drawFrameNow();
             } catch (error) {
@@ -261,7 +346,7 @@ export function useWorkbenchLayout(
             }
             return true;
         },
-        [drawFrameNow, syncHorizontal],
+        [drawFrameNow, syncHorizontal, wrap],
     );
 
     const onHorizontalScroll = useCallback(() => {
@@ -322,7 +407,7 @@ export function useWorkbenchLayout(
         });
         measureViewport();
         scheduleFrame();
-    }, [editors, hunks, measureViewport, scheduleFrame]);
+    }, [editors, hunks, measureViewport, scheduleFrame, dynamic]);
 
     const mountedEditors = editors.current;
     useLayoutEffect(() => {

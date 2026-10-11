@@ -149,6 +149,7 @@ import {
     type MergeEditorPanelOptions,
 } from "../../../src/views/MergeEditorPanel";
 import { MergeConflictSessionPanel } from "../../../src/views/MergeConflictSessionPanel";
+import { DiffViewerPanel } from "../../../src/views/DiffViewerPanel";
 import { buildResultContent } from "../../../src/webviews/react/merge-editor/mergeState";
 import type { ConflictSegment, MergeEditorData } from "../../../src/mergeEditor/conflictParser";
 
@@ -179,19 +180,19 @@ function initRepo(): void {
  * Creates a real repository where `main` and `feature` both edit the same line
  * of `shared.ts`, then starts a merge that stops on the conflict.
  */
-async function createConflictRepo(): Promise<void> {
+async function createConflictRepo(files = ["shared.ts"]): Promise<void> {
     initRepo();
 
-    await writeRepoFile("shared.ts", "function shared() {\n    return 1;\n}\n");
+    for (const file of files) await writeRepoFile(file, "function shared() {\n    return 1;\n}\n");
     git(["add", "."]);
     git(["commit", "-m", "base"]);
 
     git(["checkout", "-b", "feature"]);
-    await writeRepoFile("shared.ts", "function shared() {\n    return 2;\n}\n");
+    for (const file of files) await writeRepoFile(file, "function shared() {\n    return 2;\n}\n");
     git(["commit", "-am", "feature change"]);
 
     git(["checkout", "main"]);
-    await writeRepoFile("shared.ts", "function shared() {\n    return 3;\n}\n");
+    for (const file of files) await writeRepoFile(file, "function shared() {\n    return 3;\n}\n");
     git(["commit", "-am", "main change"]);
 
     git(["merge", "feature"], { allowFailure: true });
@@ -273,6 +274,170 @@ afterEach(async () => {
 });
 
 describe("MergeEditorPanel end-to-end merge flow", () => {
+    it("stages one file and opens the next fresh snapshot without continuing the merge", async () => {
+        await createConflictRepo(["shared.ts", "second.ts"]);
+        const head = git(["rev-parse", "HEAD"]);
+        const operation = git(["rev-parse", "MERGE_HEAD"]);
+        const second = await fs.readFile(path.join(repoRoot, "second.ts"));
+        const options = makeOptions(new GitOps(new GitExecutor(repoRoot)));
+        await MergeEditorPanel.open(options);
+        const first = lastPanel();
+        await fireMessage(first, { type: "ready" });
+        await fireMessage(first, { type: "loadMergeFiles" });
+        expect(first.postedMessages).toContainEqual({
+            type: "mergeFileQueue",
+            files: [
+                { path: "second.ts", resolved: false },
+                { path: "shared.ts", resolved: false },
+            ],
+        });
+        await fireMessage(first, {
+            type: "applyResolution",
+            content: "resolved first\n",
+            openNext: true,
+        });
+        const next = lastPanel();
+        expect(next).not.toBe(first);
+        expect(first.disposed).toBe(true);
+        await fireMessage(next, { type: "ready" });
+        expect(findConflictData(next).filePath).toBe("second.ts");
+        expect(git(["show", ":shared.ts"])).toBe("resolved first\n");
+        expect(git(["ls-files", "-u"])).toContain("second.ts");
+        expect(git(["ls-files", "-u"])).not.toContain("shared.ts");
+        expect(await fs.readFile(path.join(repoRoot, "second.ts"))).toEqual(second);
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(git(["rev-parse", "MERGE_HEAD"])).toBe(operation);
+        await fireMessage(next, { type: "loadMergeFiles" });
+        expect(next.postedMessages).toContainEqual({
+            type: "mergeFileQueue",
+            files: [
+                { path: "second.ts", resolved: false },
+                { path: "shared.ts", resolved: true },
+            ],
+        });
+        const diff = vi.spyOn(DiffViewerPanel, "open").mockResolvedValue(undefined);
+        await fireMessage(next, { type: "reviewMergeFile", filePath: "shared.ts" });
+        expect(diff).toHaveBeenCalledWith(
+            expect.objectContaining({
+                path: "shared.ts",
+                leftText: "function shared() {\n    return 1;\n}\n",
+                rightText: "resolved first\n",
+            }),
+        );
+        expect(diff.mock.calls[0][0]).not.toHaveProperty("editable");
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+    });
+
+    it("does not advance or clear the durable draft when staging fails", async () => {
+        await createConflictRepo(["shared.ts", "second.ts"]);
+        const stages = git(["ls-files", "-u"]);
+        let value: unknown;
+        const store = {
+            get: () => value,
+            update: async (_key: string, next: unknown) => {
+                value = next;
+            },
+        };
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), {
+                draftStore: store as never,
+            }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const draft = {
+            snapshotId: findConflictData(panel).workbench!.snapshotId,
+            content: "retained result\n",
+            hunks: [],
+        };
+        await fireMessage(panel, { type: "saveMergeDraft", draft, revision: 1 });
+        await fs.writeFile(path.join(repoRoot, ".git/index.lock"), "owned by test", { flag: "wx" });
+        await fireMessage(panel, {
+            type: "applyResolution",
+            content: draft.content,
+            openNext: true,
+        });
+        expect(mocks.capturedPanels).toHaveLength(1);
+        expect(panel.disposed).toBe(false);
+        expect(value).toEqual(draft);
+        expect(git(["ls-files", "-u"])).toBe(stages);
+        expect(panel.postedMessages).toContainEqual({
+            type: "resolutionError",
+            message: expect.stringContaining("staging failed"),
+        });
+    });
+
+    it("compares immutable inputs and the unsaved result without touching files or stages", async () => {
+        await createConflictRepo();
+        await MergeEditorPanel.open(makeOptions(new GitOps(new GitExecutor(repoRoot))));
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const snapshotId = findConflictData(panel).workbench!.snapshotId;
+        const before = await fs.readFile(path.join(repoRoot, "shared.ts"));
+        const index = git(["ls-files", "-u"]);
+        const diff = vi.spyOn(DiffViewerPanel, "open").mockResolvedValue(undefined);
+        for (const side of ["ours", "theirs", "result"])
+            await fireMessage(panel, {
+                type: "compareMergeVersion",
+                snapshotId,
+                side,
+                content: "unsaved result\n",
+            });
+        expect(diff.mock.calls.map(([options]) => options.rightText)).toEqual([
+            "function shared() {\n    return 3;\n}\n",
+            "function shared() {\n    return 2;\n}\n",
+            "unsaved result\n",
+        ]);
+        for (const [options] of diff.mock.calls) {
+            expect(options.leftText).toBe("function shared() {\n    return 1;\n}\n");
+            expect(options).not.toHaveProperty("editable");
+        }
+        for (const invalid of [
+            { snapshotId: "a".repeat(64), side: "result", content: "stale" },
+            { snapshotId, side: "base", content: "invalid" },
+            { snapshotId, side: "result", content: "\0" },
+            { snapshotId, side: "result", content: "界".repeat(700_000) },
+        ])
+            await fireMessage(panel, { type: "compareMergeVersion", ...invalid });
+        expect(diff).toHaveBeenCalledTimes(3);
+        expect(await fs.readFile(path.join(repoRoot, "shared.ts"))).toEqual(before);
+        expect(git(["ls-files", "-u"])).toBe(index);
+    });
+
+    it("accepts only fresh conflict paths from the captured repository queue", async () => {
+        await createConflictRepo(["shared.ts", "second.ts"]);
+        const executor = new GitExecutor(repoRoot);
+        await MergeEditorPanel.open(makeOptions(new GitOps(executor)));
+        const first = lastPanel();
+        await fireMessage(first, { type: "ready" });
+        executor.setRoot(os.tmpdir());
+        await fireMessage(first, { type: "openMergeFile", filePath: "unknown.ts" });
+        await fireMessage(first, { type: "openMergeFile", filePath: "../outside.ts" });
+        expect(mocks.capturedPanels).toHaveLength(1);
+        await fireMessage(first, { type: "openMergeFile", filePath: "second.ts" });
+        const second = lastPanel();
+        await fireMessage(second, { type: "ready" });
+        expect(findConflictData(second).filePath).toBe("second.ts");
+        expect(first.disposed).toBe(false);
+    });
+
+    it("does not include saved results from a completed operation in a new conflict queue", async () => {
+        await createConflictRepo(["shared.ts", "second.ts"]);
+        const options = makeOptions(new GitOps(new GitExecutor(repoRoot)));
+        await MergeEditorPanel.open(options);
+        const first = lastPanel();
+        await fireMessage(first, { type: "ready" });
+        await fireMessage(first, { type: "applyResolution", content: "old saved result\n" });
+        git(["merge", "--abort"]);
+        git(["merge", "feature"], { allowFailure: true });
+        await MergeEditorPanel.open(options);
+        const current = lastPanel();
+        await fireMessage(current, { type: "ready" });
+        const diff = vi.spyOn(DiffViewerPanel, "open").mockResolvedValue(undefined);
+        await fireMessage(current, { type: "reviewMergeFile", filePath: "shared.ts" });
+        expect(diff).not.toHaveBeenCalled();
+    });
+
     it("refuses a dirty buffer opened through a symlinked workspace alias", async () => {
         await createConflictRepo();
         const alias = path.join(repoRoot, "workspace-alias");

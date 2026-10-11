@@ -1,4 +1,6 @@
 {
+    "Base": "基準",
+    "Result": "結果",
     "No Git repositories found in this workspace.": "在此工作區中找不到 Git 儲存庫。",
     "Select a repository for shelf changes": "選擇儲存架變更的儲存庫",
     "Shelf service is unavailable for this repository.": "此儲存庫無法使用擱置架服務。",

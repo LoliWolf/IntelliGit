@@ -1714,7 +1714,7 @@ describe("merge workbench state and commands", () => {
             snapshotId: "a".repeat(64),
         });
         click(mounted.container, "Conflicts");
-        expect(api.postMessage).toHaveBeenCalledWith({ type: "openConflictSession" });
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "loadMergeFiles" });
         click(mounted.container, "Cancel");
         expect(api.postMessage).toHaveBeenCalledWith({ type: "close" });
         unmount(mounted.root, mounted.container);
@@ -2089,6 +2089,7 @@ describe("classic workbench chrome", () => {
                 ["toolbar-icon-btn", "Undo"],
                 ["toolbar-icon-btn", "Redo"],
                 ["toolbar-icon-btn", "Find in result"],
+                ["toolbar-icon-btn", "View options"],
                 ["toolbar-icon-btn", "Base"],
                 ["toolbar-icon-btn", "Confirm manual resolution"],
                 ["toolbar-separator", ""],
@@ -2106,10 +2107,10 @@ describe("classic workbench chrome", () => {
                     button.getAttribute("aria-label"),
                 ),
             ).toEqual(["Previous conflict", "Next conflict"]);
-            expect((children[7] as HTMLSelectElement).disabled).toBe(false);
-            expect((children[7] as HTMLSelectElement).value).toBe("whitespace");
-            expect((children[5] as HTMLButtonElement).disabled).toBe(false);
-            expect((children[14] as HTMLSelectElement).disabled).toBe(false);
+            expect((children[8] as HTMLSelectElement).disabled).toBe(false);
+            expect((children[8] as HTMLSelectElement).value).toBe("whitespace");
+            expect((children[6] as HTMLButtonElement).disabled).toBe(false);
+            expect((children[15] as HTMLSelectElement).disabled).toBe(false);
             expect(mounted.container.querySelector(".mrow-active")).not.toBeNull();
         } finally {
             unmount(mounted.root, mounted.container);
@@ -2219,7 +2220,7 @@ describe("classic workbench chrome", () => {
             click(mounted.container, "Conflicts");
             expect(api.postMessage.mock.calls.map(([message]) => message.type)).toEqual([
                 "saveMergeDraft",
-                "openConflictSession",
+                "loadMergeFiles",
             ]);
             receive({ type: "mergeDraftSaved", revision: 1 });
             expect(

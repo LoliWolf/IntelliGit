@@ -1,5 +1,14 @@
 import React from "react";
-import { VscDiscard, VscRedo, VscSearch, VscVersions, VscCheck, VscClose } from "react-icons/vsc";
+import {
+    VscDiscard,
+    VscRedo,
+    VscSearch,
+    VscVersions,
+    VscCheck,
+    VscClose,
+    VscSettingsGear,
+    VscArrowRight,
+} from "react-icons/vsc";
 import {
     IconArrowRight,
     IconArrowLeft,
@@ -39,6 +48,9 @@ type ToolbarProps = {
     onApplyNonConflicting: () => void;
     onAcceptAll: (side: "ours" | "theirs") => void;
     onResolve: (choice: MergeChoice) => void;
+    navigationCount?: number;
+    showOptions?: boolean;
+    onToggleOptions?: () => void;
 };
 export function WorkbenchToolbar({
     total,
@@ -65,6 +77,9 @@ export function WorkbenchToolbar({
     onApplyNonConflicting,
     onAcceptAll,
     onResolve,
+    navigationCount = total,
+    showOptions = false,
+    onToggleOptions,
 }: ToolbarProps) {
     return (
         <div className="merge-toolbar">
@@ -76,7 +91,7 @@ export function WorkbenchToolbar({
                         onClick={() => onMoveActive(-1)}
                         title={t("merge.toolbar.prevConflict.title")}
                         aria-label={t("merge.toolbar.prevConflict.label")}
-                        disabled={total === 0}
+                        disabled={navigationCount === 0}
                     >
                         <IconChevronUp />
                     </button>
@@ -86,7 +101,7 @@ export function WorkbenchToolbar({
                         onClick={() => onMoveActive(1)}
                         title={t("merge.toolbar.nextConflict.title")}
                         aria-label={t("merge.toolbar.nextConflict.label")}
-                        disabled={total === 0}
+                        disabled={navigationCount === 0}
                     >
                         <IconChevronDown />
                     </button>
@@ -119,6 +134,17 @@ export function WorkbenchToolbar({
                     onClick={onSearch}
                 >
                     <VscSearch />
+                </button>
+                <button
+                    type="button"
+                    className="toolbar-icon-btn"
+                    title={t("merge.flow.options")}
+                    aria-label={t("merge.flow.options")}
+                    aria-expanded={showOptions}
+                    aria-controls="merge-flow-options"
+                    onClick={onToggleOptions}
+                >
+                    <VscSettingsGear />
                 </button>
                 <button
                     type="button"
@@ -385,7 +411,7 @@ type FooterProps = {
     onOpenConflictSession: () => void;
     onUseFile: (side: "ours" | "theirs") => void;
     onClose: () => void;
-    onApply: () => void;
+    onApply: (openNext?: boolean) => void;
 };
 export function WorkbenchFooter({
     isShelfSession,
@@ -444,12 +470,25 @@ export function WorkbenchFooter({
                 <button
                     type="button"
                     className={`footer-btn primary ${canApply ? "" : "disabled"}`}
-                    onClick={onApply}
+                    onClick={() => onApply()}
                     disabled={!canApply}
                     aria-describedby="merge-remaining-status"
                 >
                     {t("common.apply")}
                 </button>
+                {!isShelfSession && (
+                    <button
+                        type="button"
+                        className="footer-btn secondary footer-next-file"
+                        onClick={() => onApply(true)}
+                        disabled={!canApply}
+                        title={t("merge.flow.saveNext")}
+                        aria-label={t("merge.flow.saveNext")}
+                        aria-describedby="merge-remaining-status"
+                    >
+                        <VscArrowRight />
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -515,15 +554,34 @@ export function WorkbenchBasePane({
     visible,
     hostRef,
     onClose,
+    onCompare,
 }: {
     visible: boolean;
     hostRef: React.Ref<HTMLDivElement>;
     onClose: () => void;
+    onCompare?: (side: "ours" | "theirs" | "result") => void;
 }) {
     return (
         <section className="merge-base" hidden={!visible}>
             <header>
                 {t("merge.workbench.base")}
+                {onCompare && (
+                    <select
+                        className="toolbar-select"
+                        aria-label={t("merge.flow.compare")}
+                        value=""
+                        onChange={(event) =>
+                            onCompare(event.target.value as "ours" | "theirs" | "result")
+                        }
+                    >
+                        <option value="" disabled>
+                            {t("merge.flow.compare")}
+                        </option>
+                        <option value="ours">{t("merge.footer.useFileOurs")}</option>
+                        <option value="theirs">{t("merge.footer.useFileTheirs")}</option>
+                        <option value="result">{t("merge.workbench.result")}</option>
+                    </select>
+                )}
                 <button
                     type="button"
                     className="toolbar-icon-btn"
