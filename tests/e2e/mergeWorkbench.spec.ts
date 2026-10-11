@@ -181,10 +181,16 @@ test.describe("Full-document Git merge workbench", () => {
             await expect(frame.locator(".pane-result .cm-foldPlaceholder")).toHaveCount(3);
             await page.screenshot({ path: testInfo.outputPath("flow-reading-restored.png") });
             await frame.getByRole("button", { name: "Apply and next file", exact: true }).click();
+            await expect
+                .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
+                .not.toContain(files[0]);
+            await expect(
+                page.getByRole("tab").filter({ hasText: `Merge: ${files[0]}` }),
+            ).toHaveCount(0);
             await expect(
                 page.getByRole("tab").filter({ hasText: `Merge: ${files[1]}` }),
-            ).toBeVisible();
-            frame = await new IntelliGitView(page).revealMergeWorkbench();
+            ).toHaveAttribute("aria-selected", "true");
+            frame = await new IntelliGitView(page).revealMergeWorkbench(undefined, files[1]);
             await expect(frame.locator(".pane-meta-row")).toContainText(files[1]);
             const stages = await runGit(workspace.root, ["ls-files", "-u"], workspace.env);
             expect(stages).toContain(files[1]);
