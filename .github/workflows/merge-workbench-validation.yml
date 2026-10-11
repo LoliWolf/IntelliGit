@@ -57,7 +57,7 @@ jobs:
                   const baselineDir="tests/visual/__screenshots__/pixelBaselines.spec.ts";
                   const baselines=fs.readdirSync(baselineDir).map(p=>`${baselineDir}/${p}`).filter(p=>expected.test(p));
                   assert.equal(baselines.length,4);
-                  console.log(JSON.stringify({sourceCommit:"d7f99a395ae331a011be9c3aac3a2474d11652bb",generatedBaselines:baselines,changedBaselines:paths}));
+                  console.log(JSON.stringify({sourceCommit:"51b6ec02d28549ab04abe4d397afe83d0bf8ab05",generatedBaselines:baselines,changedBaselines:paths}));
                   '
             - name: Validate new flow geometry and existing non-pixel oracles
               run: >-
