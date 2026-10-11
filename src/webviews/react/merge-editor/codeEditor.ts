@@ -463,12 +463,9 @@ export function createMergeCodeEditor(
                           },
                           ...(["ours", "theirs", "both", "remove"] as const).map(
                               (command, index) => ({
-                                  key: [
-                                      "Ctrl-Alt-1",
-                                      "Ctrl-Alt-2",
-                                      "Ctrl-Alt-3",
-                                      "Ctrl-Alt-0",
-                                  ][index],
+                                  key: ["Ctrl-Alt-1", "Ctrl-Alt-2", "Ctrl-Alt-3", "Ctrl-Alt-0"][
+                                      index
+                                  ],
                                   run: () => {
                                       options.keymap?.current?.[command]?.();
                                       return true;
