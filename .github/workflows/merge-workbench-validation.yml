@@ -1,0 +1,95 @@
+name: Merge flow validation
+on:
+    push:
+        branches: [validation/merge-workbench-flow]
+permissions:
+    contents: read
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+              with:
+                  node-version: "22"
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+              with:
+                  bun-version: "1.3.5"
+            - run: bun install --frozen-lockfile
+            - run: bun x playwright install --with-deps chromium
+            - name: Native Linux build gates
+              run: >-
+                  bun run format:check && bun run typecheck && bun run lint:strict &&
+                  bun run react-doctor && bun run architecture:check && bun run deps:check:strict &&
+                  bun run l10n:validate && bun run l10n:audit && bun run test:coverage && bun run package
+    renderer:
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+              with:
+                  persist-credentials: false
+            - name: Build in the digest-pinned renderer
+              run: ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build'
+            - name: Regenerate only the four merge screenshots
+              run: >-
+                  ./tests/e2e/docker/run.sh 'UPDATE_VISUAL_BASELINE=1 bun run test:visual
+                  --grep "merge-editor matches the pixel baseline" --update-snapshots'
+            - name: Verify scoped baseline changes and unchanged rendering inputs
+              run: |
+                  node -e '
+                  const {execFileSync}=require("node:child_process");
+                  const fs=require("node:fs");
+                  const assert=require("node:assert/strict");
+                  const environmentPath="tests/visual/fixtures/baselineEnvironment.json";
+                  const committed=execFileSync("git",["show",`HEAD:${environmentPath}`],{encoding:"utf8"});
+                  const expectedEnvironment=JSON.parse(committed);
+                  const observedEnvironment=JSON.parse(fs.readFileSync(environmentPath,"utf8"));
+                  assert.deepStrictEqual({...observedEnvironment,osRelease:expectedEnvironment.osRelease},expectedEnvironment);
+                  console.log(JSON.stringify({environmentInputs:"unchanged",observedKernel:observedEnvironment.osRelease,committedKernel:expectedEnvironment.osRelease}));
+                  fs.writeFileSync(environmentPath,committed);
+                  const paths=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);
+                  const expected=/^tests\/visual\/__screenshots__\/pixelBaselines\.spec\.ts\/pixel-baseline-screenshots-merge-editor-matches-the-pixel-baseline-1-(dark|light)-modern-(narrow|wide)\.png$/;
+                  assert(paths.every(p=>expected.test(p)),"Unexpected visual diff: "+JSON.stringify(paths));
+                  const baselineDir="tests/visual/__screenshots__/pixelBaselines.spec.ts";
+                  const baselines=fs.readdirSync(baselineDir).map(p=>`${baselineDir}/${p}`).filter(p=>expected.test(p));
+                  assert.equal(baselines.length,4);
+                  console.log(JSON.stringify({sourceCommit:"d7f99a395ae331a011be9c3aac3a2474d11652bb",generatedBaselines:baselines,changedBaselines:paths}));
+                  '
+            - name: Validate new flow geometry and existing non-pixel oracles
+              run: >-
+                  ./tests/e2e/docker/run.sh 'bun run test:visual
+                  tests/visual/mergeWorkbenchFlow.spec.ts tests/visual/mergeWorkbench.spec.ts
+                  tests/visual/nonPixelOracles.spec.ts
+                  --grep "(reading modes|automatic review|stacked wrapped|workbench|localized merge|merge-editor matches)"'
+            - name: Export the four scoped merge baselines
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  name: merge-flow-baselines
+                  path: tests/visual/__screenshots__/pixelBaselines.spec.ts/*merge-editor*.png
+                  if-no-files-found: error
+                  retention-days: 7
+            - name: Compare the complete visual matrix without update mode
+              run: ./tests/e2e/docker/run.sh 'bun run test:visual'
+            - name: Real Linux VS Code workflows and Diff regression
+              if: always()
+              run: >-
+                  ./tests/e2e/docker/run.sh 'xvfb-run -a bun run test:e2e --output=test-results/e2e &&
+                  xvfb-run -a bun run test:e2e:diff-viewer --output=test-results/diff-e2e'
+            - name: Installed production package smoke
+              if: always()
+              run: >-
+                  ./tests/e2e/docker/run.sh 'bun run package &&
+                  xvfb-run -a bun run test:package-smoke --output=test-results/package-smoke'
+            - name: Export diagnostics
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  name: merge-flow-diagnostics
+                  path: |
+                      tests/visual/__screenshots__/pixelBaselines.spec.ts/*merge-editor*.png
+                      test-results/
+                  retention-days: 7
