@@ -127,7 +127,7 @@ test.describe("Full-document Git merge workbench", () => {
             await frame.getByRole("checkbox", { name: "Next conflict after a decision" }).check();
             await frame.getByRole("button", { name: "Next conflict", exact: true }).click();
             await frame.locator(".pane-result .cm-line.mrow-active").click();
-            await frame.locator(".pane-result .cm-content").press("Control+Alt+ArrowLeft");
+            await frame.locator(".pane-result .cm-content").press("Control+Alt+1");
             await expect(
                 page.getByRole("tab").filter({ hasText: `Merge: ${files[0]}` }),
             ).toHaveAttribute("aria-selected", "true");
