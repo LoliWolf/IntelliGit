@@ -1066,6 +1066,94 @@ describe("MergeEditorPanel end-to-end merge flow", () => {
         expect(git(["ls-files", "-u"]).trim()).not.toBe("");
     });
 
+    it.each([
+        { encoding: "ASCII", unit: "x" },
+        { encoding: "CJK", unit: "\u4e2d" },
+        { encoding: "astral", unit: "\u{1f642}" },
+    ])("rejects oversized $encoding Apply payloads before the write path", async ({ unit }) => {
+        await createConflictRepo();
+        let saved: unknown;
+        const store = {
+            get: () => saved,
+            update: async (_key: string, value: unknown) => {
+                saved = value;
+            },
+        };
+        const onConflictStateChanged = vi.fn(async () => undefined);
+        await MergeEditorPanel.open(
+            makeOptions(new GitOps(new GitExecutor(repoRoot)), {
+                draftStore: store as never,
+                onConflictStateChanged,
+            }),
+        );
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const draft = {
+            snapshotId: findConflictData(panel).workbench!.snapshotId,
+            content: "retained draft\n",
+            hunks: [],
+        };
+        await fireMessage(panel, { type: "saveMergeDraft", draft, revision: 1 });
+        const before = await fs.readFile(path.join(repoRoot, "shared.ts"));
+        const index = git(["ls-files", "-u"]);
+        const head = git(["rev-parse", "HEAD"]);
+        const operation = git(["rev-parse", "MERGE_HEAD"]);
+        const apply = vi.spyOn(GitOps.prototype, "applyMergeResolution");
+        const limit = 2 * 1024 * 1024;
+        const content = unit.repeat(Math.floor(limit / Buffer.byteLength(unit, "utf8")) + 1);
+        expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(limit);
+
+        await fireMessage(panel, { type: "applyResolution", content, openNext: true });
+
+        expect(apply.mock.calls.length).toBe(0);
+        expect(panel.postedMessages).toContainEqual({
+            type: "resolutionError",
+            message: "Merge result payload exceeds the supported size.",
+        });
+        expect(await fs.readFile(path.join(repoRoot, "shared.ts"))).toEqual(before);
+        expect(git(["ls-files", "-u"])).toBe(index);
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(git(["rev-parse", "MERGE_HEAD"])).toBe(operation);
+        expect(saved).toEqual(draft);
+        expect(panel.disposed).toBe(false);
+        expect(mocks.capturedPanels).toHaveLength(1);
+        expect(onConflictStateChanged).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { encoding: "ASCII", unit: "x" },
+        { encoding: "CJK", unit: "\u4e2d" },
+        { encoding: "astral", unit: "\u{1f642}" },
+    ])("stages a $encoding Apply payload at the exact UTF-8 byte limit", async ({ unit }) => {
+        await createConflictRepo();
+        const head = git(["rev-parse", "HEAD"]);
+        const operation = git(["rev-parse", "MERGE_HEAD"]);
+        await MergeEditorPanel.open(makeOptions(new GitOps(new GitExecutor(repoRoot))));
+        const panel = lastPanel();
+        await fireMessage(panel, { type: "ready" });
+        const limit = 2 * 1024 * 1024;
+        const unitBytes = Buffer.byteLength(unit, "utf8");
+        const content = unit.repeat(Math.floor(limit / unitBytes)) + "x".repeat(limit % unitBytes);
+        expect(Buffer.byteLength(content, "utf8")).toBe(limit);
+
+        await fireMessage(panel, { type: "applyResolution", content });
+
+        expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+        expect((await fs.readFile(path.join(repoRoot, "shared.ts"), "utf8")) === content).toBe(
+            true,
+        );
+        expect(
+            execFileSync("git", ["show", ":shared.ts"], {
+                cwd: repoRoot,
+                maxBuffer: limit * 2,
+            }).equals(Buffer.from(content, "utf8")),
+        ).toBe(true);
+        expect(git(["ls-files", "-u"])).toBe("");
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(git(["rev-parse", "MERGE_HEAD"])).toBe(operation);
+        expect(panel.disposed).toBe(true);
+    });
+
     it("reveals the existing panel without reseeding its unsubmitted result", async () => {
         await createConflictRepo();
         const gitOps = new GitOps(new GitExecutor(repoRoot));

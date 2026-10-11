@@ -288,7 +288,7 @@ export class MergeEditorPanel {
         const content = msg.content;
         if (typeof content !== "string")
             throw new Error(vscode.l10n.t("Merge result payload must be a string."));
-        if (content.length > MAX_APPLY_CONTENT_BYTES)
+        if (Buffer.byteLength(content, "utf8") > MAX_APPLY_CONTENT_BYTES)
             throw new Error(vscode.l10n.t("Merge result payload exceeds the supported size."));
         if (msg.openNext !== undefined && typeof msg.openNext !== "boolean") return;
         await this.applyResolvedContent(content, msg.openNext === true);
