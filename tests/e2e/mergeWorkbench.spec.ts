@@ -150,7 +150,14 @@ test.describe("Full-document Git merge workbench", () => {
             frame = await new IntelliGitView(page).revealMergeWorkbench(undefined, files[0]);
             await frame.getByRole("button", { name: "Base", exact: true }).click();
             const before = await runGit(workspace.root, ["ls-files", "-u"], workspace.env);
-            await frame.getByRole("combobox", { name: "Compare with base" }).selectOption("result");
+            const baseComparison = frame.getByRole("combobox", { name: "Compare with base" });
+            await expect(baseComparison.locator("option")).toHaveText([
+                "Compare with base",
+                "Base vs Yours",
+                "Base vs Theirs",
+                "Base vs Result",
+            ]);
+            await baseComparison.selectOption({ label: "Base vs Result" });
             const diff = await new IntelliGitView(page).revealDiffViewer();
             await expect(diff.locator('[data-testid="diff-viewer-root"]')).toBeVisible();
             await expect(diff.getByLabel("This side is read only", { exact: true })).toHaveCount(2);
@@ -180,7 +187,9 @@ test.describe("Full-document Git merge workbench", () => {
             ).toHaveValue("unresolved");
             await expect(frame.locator(".pane-result .cm-foldPlaceholder")).toHaveCount(3);
             await page.screenshot({ path: testInfo.outputPath("flow-reading-restored.png") });
-            await frame.getByRole("button", { name: "Apply and next file", exact: true }).click();
+            const applyNext = frame.getByRole("button", { name: "Apply and next", exact: true });
+            await expect(applyNext).toHaveText("Apply and next");
+            await applyNext.click();
             await expect
                 .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
                 .not.toContain(files[0]);
@@ -211,7 +220,7 @@ test.describe("Full-document Git merge workbench", () => {
                 .click();
             frame = await new IntelliGitView(page).revealMergeWorkbench();
             await acceptOurs(frame);
-            await frame.getByRole("button", { name: "Apply and next file", exact: true }).click();
+            await frame.getByRole("button", { name: "Apply and next", exact: true }).click();
             await expect
                 .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
                 .toBe("");

@@ -458,5 +458,8 @@
     "merge.workbench.native": "Otwórz w VS Code",
     "merge.workbench.regroupNotice": "Zmiana sposobu obsługi białych znaków przebudowuje wynik. Twoje edycje i decyzje zostaną zastąpione (Cofnij je przywraca).",
     "merge.workbench.regroupApply": "Przebuduj wynik",
-    "merge.workbench.regroupKeep": "Zachowaj bieżący wynik"
+    "merge.workbench.regroupKeep": "Zachowaj bieżący wynik",
+    "merge.flow.compareOurs": "Podstawa a nasza wersja",
+    "merge.flow.compareTheirs": "Podstawa a ich wersja",
+    "merge.flow.compareResult": "Podstawa a wynik"
 }

@@ -428,5 +428,8 @@
     "merge.workbench.native": "VS Code에서 열기",
     "merge.workbench.regroupNotice": "공백 처리 방식을 변경하면 결과가 다시 구성됩니다. 편집 내용과 선택한 해결 방식이 대체됩니다(실행 취소로 복원할 수 있습니다).",
     "merge.workbench.regroupApply": "결과 다시 구성",
-    "merge.workbench.regroupKeep": "현재 결과 유지"
+    "merge.workbench.regroupKeep": "현재 결과 유지",
+    "merge.flow.compareOurs": "기준과 내 쪽 비교",
+    "merge.flow.compareTheirs": "기준과 상대 쪽 비교",
+    "merge.flow.compareResult": "기준과 결과 비교"
 }

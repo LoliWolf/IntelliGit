@@ -428,5 +428,8 @@
     "merge.workbench.native": "在 VS Code 中打开",
     "merge.workbench.regroupNotice": "更改空白字符处理方式会重新构建结果。您的编辑和解决选择将被替换（可通过“撤销”恢复）。",
     "merge.workbench.regroupApply": "重新构建结果",
-    "merge.workbench.regroupKeep": "保留当前结果"
+    "merge.workbench.regroupKeep": "保留当前结果",
+    "merge.flow.compareOurs": "基础版本与您的版本比较",
+    "merge.flow.compareTheirs": "基础版本与他们的版本比较",
+    "merge.flow.compareResult": "基础版本与结果比较"
 }

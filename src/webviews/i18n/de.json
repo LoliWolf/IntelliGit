@@ -438,5 +438,8 @@
     "merge.workbench.native": "In VS Code öffnen",
     "merge.workbench.regroupNotice": "Eine Änderung der Leerzeichenbehandlung erstellt das Ergebnis neu. Ihre Änderungen und Entscheidungen werden ersetzt (mit Rückgängig werden sie wiederhergestellt).",
     "merge.workbench.regroupApply": "Ergebnis neu erstellen",
-    "merge.workbench.regroupKeep": "Aktuelles Ergebnis beibehalten"
+    "merge.workbench.regroupKeep": "Aktuelles Ergebnis beibehalten",
+    "merge.flow.compareOurs": "Basis vs. eigene Version",
+    "merge.flow.compareTheirs": "Basis vs. eingehende Version",
+    "merge.flow.compareResult": "Basis vs. Ergebnis"
 }

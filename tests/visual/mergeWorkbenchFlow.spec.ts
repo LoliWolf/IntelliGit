@@ -61,6 +61,9 @@ test("reading modes keep wrapped ribbons aligned and expand common regions toget
             }),
         ),
     );
+    await expect(page.getByRole("button", { name: "Apply and next", exact: true })).toHaveText(
+        "Apply and next",
+    );
     const result = page.locator(".pane-result .cm-content");
     await page.getByRole("button", { name: "View options" }).click();
     await page.getByRole("checkbox", { name: "Soft wrap", exact: true }).check();

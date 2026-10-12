@@ -7,7 +7,6 @@ import {
     VscCheck,
     VscClose,
     VscSettingsGear,
-    VscArrowRight,
 } from "react-icons/vsc";
 import {
     IconArrowRight,
@@ -413,6 +412,7 @@ type FooterProps = {
     onClose: () => void;
     onApply: (openNext?: boolean) => void;
 };
+/** Both Apply actions share the same guarded save path; only the next-file flag differs. */
 export function WorkbenchFooter({
     isShelfSession,
     saved,
@@ -486,7 +486,7 @@ export function WorkbenchFooter({
                         aria-label={t("merge.flow.saveNext")}
                         aria-describedby="merge-remaining-status"
                     >
-                        <VscArrowRight />
+                        {t("merge.flow.saveNext")}
                     </button>
                 )}
             </div>
@@ -550,6 +550,7 @@ export function WorkbenchNotice(
     );
 }
 
+/** Comparison choices inspect a side without selecting it as the merge result. */
 export function WorkbenchBasePane({
     visible,
     hostRef,
@@ -577,9 +578,9 @@ export function WorkbenchBasePane({
                         <option value="" disabled>
                             {t("merge.flow.compare")}
                         </option>
-                        <option value="ours">{t("merge.footer.useFileOurs")}</option>
-                        <option value="theirs">{t("merge.footer.useFileTheirs")}</option>
-                        <option value="result">{t("merge.workbench.result")}</option>
+                        <option value="ours">{t("merge.flow.compareOurs")}</option>
+                        <option value="theirs">{t("merge.flow.compareTheirs")}</option>
+                        <option value="result">{t("merge.flow.compareResult")}</option>
                     </select>
                 )}
                 <button

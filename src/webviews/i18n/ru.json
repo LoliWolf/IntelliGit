@@ -458,5 +458,8 @@
     "merge.workbench.native": "Открыть в VS Code",
     "merge.workbench.regroupNotice": "Изменение обработки пробельных символов пересоздаёт результат. Ваши правки и решения заменяются (действие «Отменить» восстанавливает их).",
     "merge.workbench.regroupApply": "Пересоздать результат",
-    "merge.workbench.regroupKeep": "Сохранить текущий результат"
+    "merge.workbench.regroupKeep": "Сохранить текущий результат",
+    "merge.flow.compareOurs": "База и наша версия",
+    "merge.flow.compareTheirs": "База и входящая версия",
+    "merge.flow.compareResult": "База и результат"
 }

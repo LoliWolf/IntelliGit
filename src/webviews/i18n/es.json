@@ -448,5 +448,8 @@
     "merge.workbench.native": "Abrir en VS Code",
     "merge.workbench.regroupNotice": "Cambiar el tratamiento de los espacios en blanco reconstruye el resultado. Se reemplazan tus ediciones y decisiones (Deshacer las restaura).",
     "merge.workbench.regroupApply": "Reconstruir resultado",
-    "merge.workbench.regroupKeep": "Conservar resultado actual"
+    "merge.workbench.regroupKeep": "Conservar resultado actual",
+    "merge.flow.compareOurs": "Base frente a versión actual",
+    "merge.flow.compareTheirs": "Base frente a versión entrante",
+    "merge.flow.compareResult": "Base frente a resultado"
 }
