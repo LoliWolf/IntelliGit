@@ -86,12 +86,22 @@ async function expectSharedOverflow(page: Page) {
         .toBeGreaterThan(0);
 }
 
+/** Waits for a manual scroll to settle at its requested offset before testing clipped paint. */
 async function scrollToFraction(page: Page, fraction: number) {
     await expectSharedOverflow(page);
-    await page.locator(".merge-horizontal-scroll").evaluate((bar, part) => {
-        bar.scrollLeft = (bar.scrollWidth - bar.clientWidth) * part;
-        bar.dispatchEvent(new Event("scroll"));
+    const bar = page.locator(".merge-horizontal-scroll");
+    const target = await bar.evaluate((element, part) => {
+        const left = Math.round((element.scrollWidth - element.clientWidth) * part);
+        element.scrollLeft = left;
+        element.dispatchEvent(new Event("scroll"));
+        return left;
     }, fraction);
+    await settleScroll(page, ".merge-horizontal-scroll", "scrollLeft");
+    await expect
+        .poll(() => bar.evaluate((element) => element.scrollLeft), {
+            message: `shared scroll reaches requested fraction ${fraction}`,
+        })
+        .toBe(target);
     await expectHorizontalAgreement(page, fraction > 0);
 }
 
@@ -326,6 +336,8 @@ test("sideways caret paint is visible inside code and clipped at both edges", as
     await wideLine(page);
     await clickVisibleWideLine(page);
     await page.keyboard.press("End");
+    // Finish the keyboard-triggered caret reveal before choosing the midpoint caret.
+    await settleScroll(page, ".merge-horizontal-scroll", "scrollLeft");
     await scrollToFraction(page, 0.5);
     await clickVisibleWideLine(page);
     await expectCaretPaint(page, "sideways");
@@ -335,8 +347,8 @@ test("sideways caret paint is visible inside code and clipped at both edges", as
         const code = await page.locator(".pane-result .cm-content").boundingBox();
         if (!code) throw new Error("code box is missing");
         expect(
-            caret.x < code.x || caret.x > code.x + code.width,
-            "caret crossed the clip edge",
+            fraction === 1 ? caret.x < code.x : caret.x > code.x + code.width,
+            `${fraction === 1 ? "left" : "right"}: caret crossed the clip edge`,
         ).toBe(true);
         for (let frame = 0; frame < 3; frame++) {
             const paint = await paintCounts(page, "caret");
