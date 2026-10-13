@@ -71,7 +71,7 @@ The partial diff and CodeMirror preview also render bounded viewports.
 
 The October 14 prototype measurement on an M2 Pro/32 GiB macOS host, Chromium
 153.0.8010.12, production bundle and 20 lists measured a 10,000-file first render
-of 71.1 ms, checkbox p95 of 33.5 ms, 40 rendered file rows and 6.81 MiB retained
+of 69.8 ms, checkbox p95 of 33.4 ms, 40 rendered file rows and 6.81 MiB retained
 JS heap growth. Before virtualization, the comparable file-list baseline measured
 3,182.5 ms first render, 1,065.1 ms checkbox p95 and 335.85 MiB heap growth.
 These small-sample, warm-cache harness results are not Electron IPC, remote
