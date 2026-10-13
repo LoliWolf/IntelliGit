@@ -1,0 +1,83 @@
+name: Changelists isolated validation
+on:
+    push:
+        branches: [validation/changelists-partial-commits]
+permissions:
+    contents: read
+jobs:
+    validation:
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+              with:
+                  node-version: "22"
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+              with:
+                  bun-version: "1.3.5"
+            - name: Build in the pinned renderer
+              run: ./tests/e2e/docker/run.sh 'bun install --frozen-lockfile && bun run build'
+            - name: Generate only four new partial-change pixel baselines
+              run: >-
+                  ./tests/e2e/docker/run.sh 'UPDATE_VISUAL_BASELINE=1 bun run test:visual
+                  tests/visual/pixelBaselines.spec.ts
+                  --grep "partial-changes matches the pixel baseline" --update-snapshots'
+            - name: Verify strict baseline scope and unchanged renderer inputs
+              run: |
+                  node -e '
+                  const {execFileSync}=require("node:child_process");
+                  const fs=require("node:fs");
+                  const assert=require("node:assert/strict");
+                  const environmentPath="tests/visual/fixtures/baselineEnvironment.json";
+                  const committed=execFileSync("git",["show",`HEAD:${environmentPath}`],{encoding:"utf8"});
+                  const expected=JSON.parse(committed);
+                  const observed=JSON.parse(fs.readFileSync(environmentPath,"utf8"));
+                  assert.deepStrictEqual({...observed,osRelease:expected.osRelease},expected);
+                  console.log(JSON.stringify({renderInputs:"unchanged",observedKernel:observed.osRelease,committedKernel:expected.osRelease}));
+                  fs.writeFileSync(environmentPath,committed);
+                  const changed=execFileSync("git",["diff","--name-only","--","tests/visual"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);
+                  const added=execFileSync("git",["ls-files","--others","--exclude-standard","--","tests/visual"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);
+                  assert.deepStrictEqual(changed,[]);
+                  const pattern=/^tests\/visual\/__screenshots__\/pixelBaselines\.spec\.ts\/pixel-baseline-screenshots-partial-changes-matches-the-pixel-baseline-1-(dark|light)-modern-(narrow|wide)\.png$/;
+                  assert.equal(added.length,4);
+                  assert(added.every(file=>pattern.test(file)),JSON.stringify(added));
+                  console.log(JSON.stringify({featureCommit:"d392882",baselines:added}));
+                  '
+            - name: Export the four scoped baselines
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  name: partial-change-baselines
+                  path: tests/visual/__screenshots__/pixelBaselines.spec.ts/*partial-changes*.png
+                  if-no-files-found: error
+                  retention-days: 7
+            - run: bun install --frozen-lockfile
+            - run: bun x playwright install --with-deps chromium
+            - run: bun run format:check
+            - run: bun run typecheck
+            - run: bun run lint:strict
+            - run: bun run react-doctor
+            - run: bun run architecture:check
+            - run: bun run deps:check:strict
+            - run: bun run l10n:validate
+            - run: bun run l10n:audit
+            - name: Full Linux coverage without changing any threshold
+              run: bun run test:coverage
+            - name: Complete non-update visual suite
+              if: always()
+              run: ./tests/e2e/docker/run.sh 'bun run build && bun run test:visual'
+            - name: Real Linux VS Code workflows
+              if: always()
+              run: ./tests/e2e/docker/run.sh 'xvfb-run -a bun run test:e2e'
+            - name: Installed production smoke
+              if: always()
+              run: ./tests/e2e/docker/run.sh 'bun run package && xvfb-run -a bun run test:package-smoke'
+            - name: Export diagnostics
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  name: partial-change-diagnostics
+                  path: test-results/
+                  retention-days: 7
