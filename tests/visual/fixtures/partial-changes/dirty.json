@@ -1,0 +1,77 @@
+{
+    "schemaVersion": 1,
+    "contextId": "partial-changes",
+    "scenario": "dirty",
+    "messages": [
+        {
+            "contextId": "partial-changes",
+            "message": {
+                "type": "partialFile",
+                "file": {
+                    "snapshotId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "path": "mutable.txt",
+                    "side": "working",
+                    "base": "mutable original\n",
+                    "blocks": [
+                        {
+                            "id": "0",
+                            "fingerprint": "da3b2a9c0707ca70499999642059e7e8b995b588c90ea83ce7c4b5326a81bdd0",
+                            "oldStart": 1,
+                            "oldCount": 1,
+                            "newStart": 1,
+                            "newCount": 2,
+                            "lines": [
+                                {
+                                    "id": "0:0",
+                                    "fingerprint": "d17664600a70bba3da65ad1bc4dd6ade0c83093e657861a4d9b5b1b8912c8532",
+                                    "kind": "remove",
+                                    "text": "mutable original\n",
+                                    "oldLine": 1,
+                                    "newLine": null
+                                },
+                                {
+                                    "id": "0:1",
+                                    "fingerprint": "1d3e099266885603599cb86910c728ca0a3c063d2cded9fe298a5bc3a778c8b1",
+                                    "kind": "add",
+                                    "text": "staged change\n",
+                                    "oldLine": null,
+                                    "newLine": 1
+                                },
+                                {
+                                    "id": "0:2",
+                                    "fingerprint": "0d006b31d897dd1fadc0b2cfdf4e4b68226cbe1dd8b8f45a55580ce1276619cf",
+                                    "kind": "add",
+                                    "text": "plus unstaged addition\n",
+                                    "oldLine": null,
+                                    "newLine": 2
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "contentId": "6b638c384f7c12453dfef9d4d029ba7cc6af2a014c6a16b276b3f3c6265ca675",
+                "lists": {
+                    "revision": 1,
+                    "activeId": "default",
+                    "lists": [
+                        {
+                            "id": "default",
+                            "name": "Default"
+                        }
+                    ],
+                    "files": {
+                        "mutable.txt": "default"
+                    },
+                    "changes": {
+                        "mutable.txt": {
+                            "contentId": "6b638c384f7c12453dfef9d4d029ba7cc6af2a014c6a16b276b3f3c6265ca675",
+                            "lines": {},
+                            "totalChanges": 3
+                        }
+                    }
+                },
+                "listId": "all"
+            }
+        }
+    ]
+}

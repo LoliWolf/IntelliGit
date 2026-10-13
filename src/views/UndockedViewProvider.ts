@@ -2,6 +2,7 @@
 // and commit panel into a single unified view. Used when the user enables
 // intelligit.undockableWindow to allow dragging to a second monitor.
 import * as vscode from "vscode";
+import { ChangeWorkflowHost, isChangeWorkflowCommand } from "./ChangeWorkflowHost";
 import { captureWebview } from "../e2e/webviewCapture";
 import type { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
@@ -189,6 +190,7 @@ function migratePersistedColumnWidths(value: unknown): PersistedColumnWidths | u
  * script/resources are loaded from the extension `dist` directory.
  */
 export class UndockedViewProvider {
+    private readonly changeWorkflows = new Map<string, ChangeWorkflowHost>();
     public static readonly viewType = "intelligit.undocked";
     private static readonly MAX_VISIBLE_COMMIT_CHECKS = 200;
     private panel?: vscode.WebviewPanel;
@@ -756,7 +758,8 @@ export class UndockedViewProvider {
         });
         this.panel.webview.onDidReceiveMessage(async (msg: UnifiedOutbound) => {
             try {
-                await this.handleMessage(msg);
+                if (isChangeWorkflowCommand(msg.type)) await this.handleChangeWorkflowMessage(msg);
+                else await this.handleMessage(msg);
             } catch (err) {
                 const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(message);
@@ -777,6 +780,8 @@ export class UndockedViewProvider {
      * Invalidates commit-check demand and disposes the panel, theme resources, and host emitters.
      */
     dispose(): void {
+        for (const workflow of this.changeWorkflows.values()) workflow.dispose();
+        this.changeWorkflows.clear();
         this.commitCheckDemandSeq += 1;
         this.commitMessageGenerationCoordinator?.dropHost(this.commitMessageGenerationHost);
         this.nativeCommitInputBridge.dispose();
@@ -983,26 +988,7 @@ export class UndockedViewProvider {
                 this.postCommitDetailState();
             },
             fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
-            postCommitted: async () => {
-                let clearCommitMessage =
-                    vscode.workspace
-                        .getConfiguration("intelligit")
-                        .get<boolean>("clearLastCommit", true) !== false;
-                if (clearCommitMessage && this.workspaceState) {
-                    try {
-                        await this.workspaceState.update(commitDraftStorageKey, undefined);
-                    } catch {
-                        clearCommitMessage = false;
-                    }
-                }
-                if (clearCommitMessage) this.setFromPanelSafely(commitRepositoryRoot, "");
-                if (this.repoRootUri.fsPath !== commitRepositoryRoot) return;
-                this.postToWebview({
-                    type: "committed",
-                    repositoryRoot: commitRepositoryRoot,
-                    clearCommitMessage,
-                });
-            },
+            postCommitted: () => this.deliverCommitted(commitRepositoryRoot, commitDraftStorageKey),
             maybeOfferPublishBranch: () => Promise.resolve(),
         };
         const fileActionDeps = {
@@ -1426,6 +1412,24 @@ export class UndockedViewProvider {
         }
     }
 
+    /** Clears only the captured repository draft after its commit completes. */
+    private async deliverCommitted(root: string, storageKey: string): Promise<void> {
+        let clearCommitMessage =
+            vscode.workspace
+                .getConfiguration("intelligit")
+                .get<boolean>("clearLastCommit", true) !== false;
+        if (clearCommitMessage && this.workspaceState) {
+            try {
+                await this.workspaceState.update(storageKey, undefined);
+            } catch {
+                clearCommitMessage = false;
+            }
+        }
+        if (clearCommitMessage) this.setFromPanelSafely(root, "");
+        if (this.repoRootUri.fsPath !== root) return;
+        this.postToWebview({ type: "committed", repositoryRoot: root, clearCommitMessage });
+    }
+
     /** Runs one root-bound commit action while holding the shared commit lease until it settles. */
     private async runCommitActionWithLease(
         commitRepositoryRoot: string,
@@ -1439,6 +1443,46 @@ export class UndockedViewProvider {
         } finally {
             release?.();
         }
+    }
+
+    private async handleChangeWorkflowMessage(msg: UnifiedOutbound): Promise<void> {
+        const message = msg as unknown as Record<string, unknown>;
+        const root =
+            typeof message.repositoryRoot === "string" ? message.repositoryRoot : undefined;
+        if (!root || !this.findRepository(root)) throw new Error("Unknown changelist repository.");
+        await this.changeWorkflow(root).handle(message);
+    }
+
+    /** A later repository switch cannot redirect an already dispatched workflow or clear its draft. */
+    private changeWorkflow(root: string): ChangeWorkflowHost {
+        const previous = this.changeWorkflows.get(root);
+        if (previous) return previous;
+        const gitOps = this.gitOps.deriveFor(root);
+        const current = () => this.repoRootUri.fsPath === root;
+        const workflow = new ChangeWorkflowHost({
+            root,
+            extensionUri: this.extensionUri,
+            workspaceState: this.workspaceState,
+            gitOps,
+            files: () => (current() ? this.files : []),
+            post: (message) => this.postToWebview(message),
+            actions: {
+                gitOps,
+                refreshData: () => (current() ? this.refreshCommitPanelData() : Promise.resolve()),
+                refreshGraphData: async () => {
+                    if (!current()) return;
+                    await this.sendBranches();
+                    await this.loadInitial();
+                },
+                fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
+                postCommitted: () =>
+                    this.deliverCommitted(root, this.getCommitDraftStorageKey(root)),
+                maybeOfferPublishBranch: () => Promise.resolve(),
+            },
+            runCommit: (operation) => this.runCommitActionWithLease(root, () => operation()),
+        });
+        this.changeWorkflows.set(root, workflow);
+        return workflow;
     }
 
     /** Registers an undocked request before root-bound asynchronous status validation. */
@@ -1897,6 +1941,16 @@ export class UndockedViewProvider {
             ]);
             if (!canUpdate()) return;
             this.files = files;
+            void this.changeWorkflows
+                .get(this.repoRootUri.fsPath)
+                ?.reconcile(files)
+                .catch((error: unknown) => {
+                    this.postToWebview({
+                        type: "error",
+                        repositoryRoot: this.repoRootUri.fsPath,
+                        message: getErrorMessage(error),
+                    });
+                });
             this.stashes = stashes;
             this.selectedStashIndex = selectedStashIndex;
             this.stashFiles = stashFiles;

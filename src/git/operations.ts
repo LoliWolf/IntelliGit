@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { readEmptyTreeOid } from "./emptyTree";
+import { PartialChanges } from "./partialChanges";
 import { GitExecutor } from "./executor";
 import {
     readMergeResolutionSnapshot,
@@ -349,6 +350,10 @@ export class GitOps {
      */
     deriveFor(repoRoot: string): GitOps {
         return new GitOps(this.executor.deriveFor(repoRoot), this.confirmSetUpstreamPush);
+    }
+    /** Creates a captured-root partial workflow sharing the activation-owned mutation gate. */
+    partialChangesFor(repoRoot: string): PartialChanges {
+        return new PartialChanges(this.executor.deriveFor(repoRoot), repoRoot);
     }
     /** Merges one validated local or remote branch through this facade's shared mutation gate. */
     async merge(branch: string): Promise<void> {

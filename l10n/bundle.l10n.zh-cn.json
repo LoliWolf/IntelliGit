@@ -862,5 +862,14 @@
     "Load the conflict before applying a resolution.": "请加载冲突后再应用解决结果。",
     "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "文件在编辑器中有未保存的修改。请保存或放弃这些修改后再应用，合并草稿已保留。",
     "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "拉取前，请将 intelligit.updateStrategy 设置为 \"rebase\" 或 \"merge\"。",
-    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "此存储库的工作区文件夹使用了不同的 intelligit.updateStrategy 值。拉取前，请在每个文件夹中选择相同的值。"
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "此存储库的工作区文件夹使用了不同的 intelligit.updateStrategy 值。拉取前，请在每个文件夹中选择相同的值。",
+    "New changelist": "新建更改列表",
+    "Rename changelist": "重命名更改列表",
+    "Enter a changelist name of 1 to 80 characters.": "请输入 1 到 80 个字符的更改列表名称。",
+    "Move selected changes": "移动所选更改",
+    "Remove this changelist and move its changes to Default?": "移除此列表并将更改移到默认列表？",
+    "Selected changes: {path}": "所选更改：{path}",
+    "Save the native editor before selecting partial changes.": "选择部分更改前请保存原生编辑器。",
+    "Selected changes failed: {message}": "所选更改操作失败：{message}",
+    "Changelist action failed: {message}": "更改列表操作失败：{message}"
 }

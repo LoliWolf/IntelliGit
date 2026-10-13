@@ -57,6 +57,7 @@ import {
 } from "./recordDiffViewerWebviewFixture";
 import type { WebviewFixture } from "./webviewFixtureTypes";
 import { recordFileHistoryWebviewFixture } from "./recordFileHistoryWebviewFixture";
+import { recordPartialChangesWebviewFixture } from "./recordPartialChangesWebviewFixture";
 
 /** One registered recording: which committed fixture it produces, and how to reproduce it. */
 export interface WebviewFixtureRecorderEntry {
@@ -231,4 +232,16 @@ export const WEBVIEW_FIXTURE_RECORDERS: readonly WebviewFixtureRecorderEntry[] =
             }),
     },
     { contextId: "file-history", scenario: "clean", record: recordFileHistoryWebviewFixture },
+    {
+        contextId: "partial-changes",
+        scenario: "dirty",
+        record: (workspace) => {
+            const template = requireScenarioTemplate(workspace, "partial-changes");
+            return recordPartialChangesWebviewFixture({
+                repoRoot: workspace.root,
+                roots: { root: workspace.root, originRoot: template.originRoot, profileDir: "" },
+                env: workspace.env,
+            });
+        },
+    },
 ];

@@ -151,6 +151,17 @@ export class IntelliGitView {
         return this.frameOwning(".session-root", timeoutMs);
     }
 
+    /** Resolves the fixed-file selected-changes editor without positional iframe assumptions. */
+    public async revealPartialChanges(
+        filePath?: string,
+        timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS,
+    ): Promise<FrameLocator> {
+        const marker = filePath
+            ? `.partial-changes:has(.partial-toolbar strong[title=${JSON.stringify(filePath)}])`
+            : ".partial-changes";
+        return this.frameOwning(marker, timeoutMs);
+    }
+
     /**
      * Resolves the IntelliGit webview whose document renders `marker`, retrying while the workbench
      * finishes rendering it.

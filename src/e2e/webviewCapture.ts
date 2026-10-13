@@ -28,6 +28,7 @@ export const WEBVIEW_CONTEXT_IDS = [
     "merge-conflict-session",
     "diff-viewer",
     "file-history",
+    "partial-changes",
 ] as const;
 
 /** A resolved host context. Assigning an unlisted string is a compile error. */

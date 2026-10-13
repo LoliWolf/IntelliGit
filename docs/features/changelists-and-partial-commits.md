@@ -1,0 +1,91 @@
+# Changelists and Selected Changes
+
+Changelists are worktree-scoped metadata, not branches, stashes or separate Git
+indexes. The Changes toolbar supports creating, renaming, removing and activating
+lists, filtering their files and moving whole-file membership. The active list
+owns newly discovered changes. Removing a list moves its membership to Default.
+
+Open **Partial changes** for one checked ordinary text file. Select blocks or
+individual added/deleted lines; the read-only, syntax-highlighted preview shows
+the complete proposed file. Assign selected changes to a list, stage/unstage them,
+use the selection in the Commit panel, or explicitly commit the selection.
+
+The Commit panel routes partial inclusion through the selected-content workflow,
+not its existing whole-file `commit --only` path. Committing a list includes only
+its ownership in split files. Successful partial commits consume committed
+ownership and leave an explicit empty inclusion for that scope; selecting the
+whole file again is an explicit choice to include its remaining changes.
+
+## Supported Scope
+
+- Existing tracked UTF-8 regular files, at most 2 MiB, 100,000 lines and 16,384
+  bytes per line; Git-compatible CRLF clean conversion.
+- A selected commit includes 1 to 64 text files, at most 16 MiB of selected text.
+- Detached HEAD and separate Git worktrees are supported.
+- Binary/non-UTF-8 files, adds/deletes/renames/mode changes, submodules, sparse or
+  assume-unchanged entries and custom filters/working-tree encodings use the
+  existing whole-file/native workflow instead.
+- Partial amend and partial stash/shelf/rollback are not implemented. A commit
+  mixing partial text selections and unsupported structural changes must be
+  split into separate explicit actions.
+- No semantic/AST merge engine, LSP integration or full JetBrains equivalence is
+  implied. Pure browser extension hosts without the Node Git backend are outside
+  this workflow.
+
+## Transaction Boundaries
+
+The host computes Git diffs and owns immutable snapshots. Webviews send snapshot
+and line IDs, never patches or arbitrary Git arguments. Snapshots fence the
+canonical worktree, HEAD/ref, entire index, file bytes, operation state, attributes
+and clean conversion. Dirty native buffers and symlink aliases are checked.
+
+Partial stage/unstage builds an alternate index and atomically publishes it under
+an exclusively acquired, inode-verified `index.lock`. It never writes the
+worktree or advances HEAD.
+
+Selected commits use an isolated Git directory with the original branch name,
+the actual worktree, effective identity/signing settings, real hooks and a
+selected index. Hook rejection and signer failure are failures, not bypasses.
+The resulting tree and parent must match the selection before the commit object
+is imported and the real ref is updated by compare-and-swap. Hooks can have their
+own worktree/external side effects; those are not rolled back. Changes that hooks
+add to the selected tree are refused, rather than silently committed.
+
+The real index retains unrelated staging and is reconciled with the new HEAD.
+Durable journals live under the worktree Git directory at
+`intelligit/partial-index`. Recovery never deletes a foreign lock or overwrites
+externally changed refs/indexes. An interrupted published commit reports that it
+already succeeded and needs reconciliation, not another commit. POSIX directory
+fsync is used; Windows has no equivalent directory fsync through this Node API.
+
+List writes use shared workspace storage, revision compare-and-swap and root-bound
+commit leases. Stale assignments/selections require explicit review. Corrupt
+metadata is refused, not overwritten.
+
+## Performance and Verification
+
+Diffs are requested for the active file, not once per list. Text/snapshot caches
+are bounded. Large commit trees virtualize above 200 visible rows using the
+existing scroller and row components; small trees keep the existing layout.
+The partial diff and CodeMirror preview also render bounded viewports.
+
+The October 14 prototype measurement on an M2 Pro/32 GiB macOS host, Chromium
+153.0.8010.12, production bundle and 20 lists measured a 10,000-file first render
+of 71.1 ms, checkbox p95 of 33.5 ms, 40 rendered file rows and 6.81 MiB retained
+JS heap growth. Before virtualization, the comparable file-list baseline measured
+3,182.5 ms first render, 1,065.1 ms checkbox p95 and 335.85 MiB heap growth.
+These small-sample, warm-cache harness results are not Electron IPC, remote
+filesystem latency or a bound on hook/signing time. Initial full-stat host refresh
+still costs roughly one second at 10,000 changed files; lazy statistics are not
+implemented here.
+
+Focused verification:
+
+```sh
+bun x vitest run tests/unit/changes tests/integration/changes
+bun x playwright test --config playwright.visual.config.ts tests/visual/partialChanges.spec.ts
+bun x playwright test --config playwright.e2e.config.ts --project=e2e tests/e2e/partialChanges.spec.ts
+```
+
+Pixel baselines must come from the repository's pinned Linux renderer. macOS
+screenshots are diagnostic evidence, not replacement Linux baselines.

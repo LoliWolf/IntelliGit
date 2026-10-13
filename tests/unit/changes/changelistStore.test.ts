@@ -1,0 +1,232 @@
+import { describe, expect, it } from "vitest";
+import { ChangelistStore } from "../../../src/changes/changelistStore";
+
+describe("worktree changelist metadata", () => {
+    it("persists lists and active membership without invoking Git", async () => {
+        const values = new Map<string, unknown>();
+        const storage = {
+            get: <T>(key: string) => values.get(key) as T | undefined,
+            update: async (key: string, value: unknown) => {
+                values.set(key, structuredClone(value));
+            },
+        };
+        const store = new ChangelistStore(storage);
+        let state = await store.create("/one", 0, "Feature");
+        const feature = state.lists[1].id;
+        state = await store.activate("/one", state.revision, feature);
+        state = await store.reconcileFiles("/one", ["one.txt", "__proto__"]);
+        expect(state.files["one.txt"]).toBe(feature);
+        expect(Object.hasOwn(state.files, "__proto__")).toBe(true);
+        expect(new ChangelistStore(storage).get("/one")).toEqual(state);
+        expect(store.get("/two").files).toEqual({});
+    });
+
+    it("rejects stale concurrent metadata mutations and preserves the accepted one", async () => {
+        const store = new ChangelistStore();
+        const accepted = store.create("/one", 0, "First");
+        const rejected = store.create("/one", 0, "Second");
+        await expect(accepted).resolves.toMatchObject({ revision: 1 });
+        await expect(rejected).rejects.toThrow("changed");
+        expect(store.get("/one").lists).toHaveLength(2);
+    });
+
+    it("moves removed-list members to Default without losing files", async () => {
+        const store = new ChangelistStore();
+        let state = await store.create("/one", 0, "Feature");
+        const feature = state.lists[1].id;
+        state = await store.reconcileFiles("/one", ["one.txt"]);
+        state = await store.moveFiles("/one", state.revision, feature, ["one.txt"]);
+        state = await store.remove("/one", state.revision, feature);
+        expect(state.files).toEqual({ "one.txt": "default" });
+        await expect(store.remove("/one", state.revision, "default")).rejects.toThrow();
+    });
+
+    it("marks per-line ownership stale after content changes and requires explicit review", async () => {
+        const store = new ChangelistStore();
+        let state = await store.reconcileFiles("/one", ["one.txt"]);
+        state = await store.registerChanges("/one", "one.txt", "first");
+        const fingerprint = "a".repeat(64);
+        state = await store.assignChanges(
+            "/one",
+            state.revision,
+            "one.txt",
+            "first",
+            "default",
+            [fingerprint],
+            new Set([fingerprint]),
+        );
+        state = await store.registerChanges("/one", "one.txt", "second");
+        expect(state.changes["one.txt"].stale).toBe(true);
+        await expect(
+            store.assignChanges(
+                "/one",
+                state.revision,
+                "one.txt",
+                "first",
+                "default",
+                [fingerprint],
+                new Set([fingerprint]),
+            ),
+        ).rejects.toThrow("stale");
+        state = await store.assignChanges(
+            "/one",
+            state.revision,
+            "one.txt",
+            "second",
+            "default",
+            [fingerprint],
+            new Set([fingerprint]),
+        );
+        expect(state.changes["one.txt"].stale).toBe(false);
+    });
+
+    it("does not publish a failed persistence mutation", async () => {
+        const store = new ChangelistStore({
+            get: () => undefined,
+            update: async () => {
+                throw new Error("disk failure");
+            },
+        });
+        await expect(store.create("/one", 0, "Feature")).rejects.toThrow("disk failure");
+        expect(store.get("/one").revision).toBe(0);
+    });
+
+    it("keeps commit inclusion separate from line ownership and preserves stale choices", async () => {
+        const store = new ChangelistStore();
+        await store.reconcileFiles("/one", ["one.txt"]);
+        let state = await store.registerChanges("/one", "one.txt", "first", 4);
+        state = await store.recordSelection("/one", "one.txt", "first", "all", ["0:1"], 4);
+        expect(state.changes["one.txt"].lines).toEqual({});
+        expect(state.changes["one.txt"].selections?.all.lineIds).toEqual(["0:1"]);
+        state = await store.registerChanges("/one", "one.txt", "second", 6);
+        expect(state.changes["one.txt"].selections?.all.contentId).toBe("first");
+        state = await store.resetSelection("/one", state.revision, "all", ["one.txt"]);
+        expect(state.changes["one.txt"].selections?.all).toBeUndefined();
+    });
+
+    it("does not erase unreviewed assignments with a subset replacement", async () => {
+        const store = new ChangelistStore();
+        let state = await store.registerChanges("/one", "one.txt", "old");
+        const first = "a".repeat(64);
+        const second = "b".repeat(64);
+        state = await store.assignChanges(
+            "/one",
+            state.revision,
+            "one.txt",
+            "old",
+            "default",
+            [first, second],
+            new Set([first, second]),
+        );
+        state = await store.registerChanges("/one", "one.txt", "new");
+        await expect(
+            store.assignChanges(
+                "/one",
+                state.revision,
+                "one.txt",
+                "new",
+                "default",
+                [first],
+                new Set([first, second]),
+            ),
+        ).rejects.toThrow("all current");
+        expect(store.get("/one").changes["one.txt"].lines).toEqual({
+            [first]: "default",
+            [second]: "default",
+        });
+    });
+
+    it("retains corrupt metadata rather than overwriting another root's records", async () => {
+        const original = { schemaVersion: 2, entries: [{ root: "/one", state: {} }] };
+        let written = false;
+        const store = new ChangelistStore({
+            get: <T>() => original as T,
+            update: async () => {
+                written = true;
+            },
+        });
+        expect(() => store.get("/one")).toThrow("will not be overwritten");
+        await expect(store.create("/two", 0, "New")).rejects.toThrow();
+        expect(written).toBe(false);
+    });
+
+    it("shares a root commit lease across providers without blocking another repository", async () => {
+        const storage = { get: <T>() => undefined as T | undefined, update: async () => undefined };
+        const first = ChangelistStore.forStorage(storage);
+        const second = ChangelistStore.forStorage(storage);
+        expect(second).toBe(first);
+        const release = await first.beginCommit("/one");
+        expect(second.isCommitting("/one")).toBe(true);
+        await expect(second.beginCommit("/one")).rejects.toThrow("in progress");
+        await expect(second.create("/one", 0, "Blocked")).rejects.toThrow("during");
+        await expect(
+            second.recordSelection("/one", "one.txt", "content", "all", [], 0),
+        ).rejects.toThrow("during");
+        await expect(second.create("/two", 0, "Other root")).resolves.toMatchObject({
+            revision: 1,
+        });
+        release();
+        release();
+        expect(second.isCommitting("/one")).toBe(false);
+        await expect(second.create("/one", 0, "Accepted")).resolves.toMatchObject({ revision: 1 });
+    });
+
+    it("consumes only committed ownership and leaves explicit empty inclusion for the remainder", async () => {
+        const store = new ChangelistStore();
+        let state = await store.create("/one", 0, "Other");
+        const other = state.lists[1].id;
+        const first = "a".repeat(64);
+        const second = "b".repeat(64);
+        state = await store.registerChanges("/one", "one.txt", "before", 4);
+        state = await store.assignChanges(
+            "/one",
+            state.revision,
+            "one.txt",
+            "before",
+            "default",
+            [first],
+            new Set([first, second]),
+        );
+        state = await store.assignChanges(
+            "/one",
+            state.revision,
+            "one.txt",
+            "before",
+            other,
+            [second],
+            new Set([first, second]),
+        );
+        await store.recordSelection("/one", "one.txt", "before", "all", ["0:1"], 4);
+        const release = await store.beginCommit("/one");
+        try {
+            state = await store.consumeCommitted(
+                "/one",
+                "one.txt",
+                "after",
+                "all",
+                new Set([first]),
+                new Set([second]),
+                2,
+            );
+            expect(state.changes["one.txt"]).toMatchObject({
+                contentId: "after",
+                lines: { [second]: other },
+                stale: false,
+                selections: { all: { contentId: "after", lineIds: [], total: 2 } },
+            });
+            expect(state.changes["one.txt"].lines[first]).toBeUndefined();
+            state = await store.consumeCommitted(
+                "/one",
+                "one.txt",
+                "shifted",
+                "all",
+                new Set(),
+                new Set(),
+                2,
+            );
+            expect(state.changes["one.txt"].stale).toBe(true);
+        } finally {
+            release();
+        }
+    });
+});

@@ -862,5 +862,14 @@
     "Merge result payload must be a string.": "Merge result payload must be a string.",
     "Merge result payload exceeds the supported size.": "Merge result payload exceeds the supported size.",
     "Load the conflict before applying a resolution.": "Load the conflict before applying a resolution.",
-    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained."
+    "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.",
+    "New changelist": "New changelist",
+    "Rename changelist": "Rename changelist",
+    "Enter a changelist name of 1 to 80 characters.": "Enter a changelist name of 1 to 80 characters.",
+    "Move selected changes": "Move selected changes",
+    "Remove this changelist and move its changes to Default?": "Remove this changelist and move its changes to Default?",
+    "Selected changes: {path}": "Selected changes: {path}",
+    "Save the native editor before selecting partial changes.": "Save the native editor before selecting partial changes.",
+    "Selected changes failed: {message}": "Selected changes failed: {message}",
+    "Changelist action failed: {message}": "Changelist action failed: {message}"
 }

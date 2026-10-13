@@ -7,6 +7,7 @@ const WEBVIEW_CONFIGS = [
     { entry: "react/CommitGraphApp", out: "webview-commitgraph" },
     { entry: "react/CompactCommitGraphApp", out: "webview-compactcommitgraph" },
     { entry: "react/commit-panel/CommitPanelApp", out: "webview-commitpanel" },
+    { entry: "react/partial-changes/PartialChangesApp", out: "webview-partialchanges" },
     { entry: "react/CommitInfoApp", out: "webview-commitinfo" },
     { entry: "react/merge-editor/MergeEditorApp", out: "webview-mergeeditor" },
     { entry: "react/diff-viewer/DiffViewerApp", out: "webview-diffviewer" },
@@ -100,6 +101,7 @@ function createWebviewBuildOptions({ entry, out, production = false }) {
         "webview-diffviewer",
         "webview-mergeeditor",
         "webview-filehistory",
+        "webview-partialchanges",
     ].includes(out);
     return {
         entryPoints: [

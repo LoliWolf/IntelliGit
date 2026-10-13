@@ -862,5 +862,14 @@
     "Load the conflict before applying a resolution.": "解決を適用する前に競合を読み込んでください。",
     "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "ファイルにエディターの未保存の変更があります。適用前に保存または破棄してください。マージの下書きは保持されています。",
     "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "プルする前に intelligit.updateStrategy を \"rebase\" または \"merge\" に設定してください。",
-    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "このリポジトリのワークスペースフォルダーで intelligit.updateStrategy の値が異なっています。プルする前に、各フォルダーで同じ値を選択してください。"
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "このリポジトリのワークスペースフォルダーで intelligit.updateStrategy の値が異なっています。プルする前に、各フォルダーで同じ値を選択してください。",
+    "New changelist": "新しい変更リスト",
+    "Rename changelist": "変更リストの名前を変更",
+    "Enter a changelist name of 1 to 80 characters.": "1～80文字の変更リスト名を入力してください。",
+    "Move selected changes": "選択した変更を移動",
+    "Remove this changelist and move its changes to Default?": "この変更リストを削除し変更をデフォルトに移動しますか？",
+    "Selected changes: {path}": "選択した変更: {path}",
+    "Save the native editor before selecting partial changes.": "変更の一部を選択する前にネイティブエディターを保存してください。",
+    "Selected changes failed: {message}": "選択した変更の処理に失敗しました: {message}",
+    "Changelist action failed: {message}": "変更リストの操作に失敗しました: {message}"
 }

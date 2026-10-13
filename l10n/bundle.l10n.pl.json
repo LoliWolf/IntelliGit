@@ -862,5 +862,14 @@
     "Load the conflict before applying a resolution.": "Wczytaj konflikt przed zastosowaniem rozwiązania.",
     "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Plik ma niezapisane zmiany w edytorze. Zapisz je lub odrzuć przed zastosowaniem; szkic scalania został zachowany.",
     "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Przed wykonaniem Pull ustaw intelligit.updateStrategy na \"rebase\" lub \"merge\".",
-    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Foldery obszaru roboczego tego repozytorium mają różne wartości intelligit.updateStrategy. Przed wykonaniem Pull wybierz tę samą wartość w każdym folderze."
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Foldery obszaru roboczego tego repozytorium mają różne wartości intelligit.updateStrategy. Przed wykonaniem Pull wybierz tę samą wartość w każdym folderze.",
+    "New changelist": "Nowa lista zmian",
+    "Rename changelist": "Zmień nazwę listy zmian",
+    "Enter a changelist name of 1 to 80 characters.": "Wpisz nazwę o długości od 1 do 80 znaków.",
+    "Move selected changes": "Przenieś wybrane zmiany",
+    "Remove this changelist and move its changes to Default?": "Usunąć tę listę i przenieść zmiany do Domyślnej?",
+    "Selected changes: {path}": "Wybrane zmiany: {path}",
+    "Save the native editor before selecting partial changes.": "Zapisz natywny edytor przed wybraniem częściowych zmian.",
+    "Selected changes failed: {message}": "Operacja na wybranych zmianach nie powiodła się: {message}",
+    "Changelist action failed: {message}": "Operacja na liście zmian nie powiodła się: {message}"
 }

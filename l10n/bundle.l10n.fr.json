@@ -862,5 +862,14 @@
     "Load the conflict before applying a resolution.": "Chargez le conflit avant d’appliquer une résolution.",
     "The file has unsaved editor changes. Save or discard them before applying; your merge draft is retained.": "Le fichier contient des modifications non enregistrées dans l’éditeur. Enregistrez-les ou abandonnez-les avant d’appliquer ; votre brouillon de fusion est conservé.",
     "Set intelligit.updateStrategy to \"rebase\" or \"merge\" before pulling.": "Définissez intelligit.updateStrategy sur \"rebase\" ou \"merge\" avant d'exécuter Pull.",
-    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Les dossiers de l'espace de travail de ce dépôt ont des valeurs différentes pour intelligit.updateStrategy. Choisissez la même valeur dans chaque dossier avant d'exécuter Pull."
+    "Workspace folders for this repository have different intelligit.updateStrategy values. Choose the same value in each folder before pulling.": "Les dossiers de l'espace de travail de ce dépôt ont des valeurs différentes pour intelligit.updateStrategy. Choisissez la même valeur dans chaque dossier avant d'exécuter Pull.",
+    "New changelist": "Nouvelle liste de modifications",
+    "Rename changelist": "Renommer la liste de modifications",
+    "Enter a changelist name of 1 to 80 characters.": "Saisissez un nom de 1 à 80 caractères.",
+    "Move selected changes": "Déplacer les modifications sélectionnées",
+    "Remove this changelist and move its changes to Default?": "Supprimer cette liste et déplacer ses modifications vers Par défaut?",
+    "Selected changes: {path}": "Modifications sélectionnées : {path}",
+    "Save the native editor before selecting partial changes.": "Enregistrez l'éditeur natif avant de sélectionner des modifications partielles.",
+    "Selected changes failed: {message}": "Échec des modifications sélectionnées : {message}",
+    "Changelist action failed: {message}": "Échec de l'action de liste de modifications : {message}"
 }

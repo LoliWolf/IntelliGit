@@ -1,0 +1,313 @@
+import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { changeIds, selectedContent, validateSelection } from "../changes/selection";
+import type { ChangeFileView, SelectedFileChanges } from "../webviews/protocol/changeSelection";
+import type { GitExecutor } from "./executor";
+import { mapWithConcurrency } from "../utils/concurrency";
+import {
+    assertPartialSnapshotCurrent,
+    MAX_PARTIAL_TEXT_BYTES,
+    readPartialSnapshot,
+    type PartialFileSnapshot,
+} from "./partialSnapshot";
+import {
+    preparePartialCommit,
+    publishPartialIndex,
+    recoverPartialIndexes,
+    type PartialTransactionFaults,
+} from "./partialIndexTransaction";
+
+type DirtyBufferGuard = (paths: readonly string[]) => void | Promise<void>;
+const MAX_SESSION_BYTES = 32 * 1024 * 1024;
+const MAX_COMMIT_BYTES = 16 * 1024 * 1024;
+
+/** Root-bound ordinary-text staging and commits, separate from whole-file panel actions. */
+export class PartialChanges {
+    private readonly snapshots = new Map<string, PartialFileSnapshot>();
+    private bytes = 0;
+
+    /** The executor is derived for this captured worktree and shares activation's mutation gate. */
+    constructor(
+        private readonly executor: GitExecutor,
+        private readonly root: string,
+    ) {}
+
+    /** Captures a server-owned snapshot; the browser receives only its immutable view. */
+    async open(file: string, side: "working" | "index" = "working"): Promise<ChangeFileView> {
+        await this.recover();
+        const snapshot = await readPartialSnapshot(this.executor, this.root, file, side);
+        const old = this.snapshots.get(snapshot.view.snapshotId);
+        if (old) {
+            this.snapshots.delete(snapshot.view.snapshotId);
+            this.snapshots.set(snapshot.view.snapshotId, old);
+            return structuredClone(old.view);
+        }
+        this.snapshots.set(snapshot.view.snapshotId, snapshot);
+        this.bytes += snapshotBytes(snapshot);
+        while (this.snapshots.size > 64 || this.bytes > MAX_SESSION_BYTES) {
+            const oldest = this.snapshots.entries().next().value;
+            if (!oldest) break;
+            this.snapshots.delete(oldest[0]);
+            this.bytes -= snapshotBytes(oldest[1]);
+        }
+        return structuredClone(snapshot.view);
+    }
+
+    /** Resolves metadata identities from the host cache, never a supplied filename or patch. */
+    snapshot(id: string): PartialFileSnapshot {
+        const snapshot = this.snapshots.get(id);
+        if (!snapshot) throw new Error("The change snapshot expired. Reopen its changes.");
+        return snapshot;
+    }
+
+    /** Applies selected working changes, or removes selected indexed changes, without a worktree write. */
+    async stage(
+        selection: SelectedFileChanges,
+        assertNoDirtyBuffer: DirtyBufferGuard,
+    ): Promise<void> {
+        const snapshot = this.snapshot(selection.snapshotId);
+        const selectedLines = validateSelection(snapshot.view.blocks, selection.lineIds);
+        if (!selection.lineIds.length) throw new Error("Select changes first.");
+        await this.executor.runWithinMutationGate(async () => {
+            await assertNoDirtyBuffer([snapshot.view.path]);
+            await assertPartialSnapshotCurrent(this.executor, snapshot);
+            const directory = await mkdtemp(path.join(tmpdir(), "intelligit-partial-stage-"));
+            try {
+                const index = path.join(directory, "index");
+                await copyFile(snapshot.indexPath, index);
+                await this.materializeIndex(index);
+                const selected =
+                    snapshot.view.side === "index"
+                        ? changeIds(snapshot.view.blocks).filter((id) => !selectedLines.has(id))
+                        : selection.lineIds;
+                const content = selectedContent(snapshot.view.base, snapshot.view.blocks, selected);
+                assertContentSize(content);
+                const result =
+                    snapshot.view.side === "index"
+                        ? content
+                        : await this.reconcileText(directory, snapshot, content);
+                await this.writeBlob(index, snapshot, result);
+                await publishPartialIndex(this.executor, snapshot, index, undefined, async () => {
+                    await assertNoDirtyBuffer([snapshot.view.path]);
+                    await assertPartialSnapshotCurrent(this.executor, snapshot);
+                });
+                this.clear();
+            } finally {
+                await rm(directory, { recursive: true, force: true });
+            }
+        });
+    }
+
+    /** Commits exactly selected text while retaining all unrelated index and worktree content. */
+    async commit(
+        selections: readonly SelectedFileChanges[],
+        message: string,
+        assertNoDirtyBuffer: DirtyBufferGuard,
+        faults: PartialTransactionFaults = {},
+    ): Promise<string> {
+        if (!message.trim() || Buffer.byteLength(message, "utf8") > 256 * 1024) {
+            throw new Error("Enter a supported commit message.");
+        }
+        if (!selections.length || selections.length > 64)
+            throw new Error("Select 1 to 64 text files.");
+        const snapshots = selections.map((selection) => this.snapshot(selection.snapshotId));
+        const first = snapshots[0];
+        const paths = snapshots.map((snapshot) => snapshot.view.path);
+        if (new Set(paths).size !== paths.length)
+            throw new Error("Duplicate partial-commit files.");
+        if (
+            snapshots.some(
+                (snapshot) =>
+                    snapshot.indexHash !== first.indexHash ||
+                    snapshot.head !== first.head ||
+                    snapshot.ref !== first.ref ||
+                    snapshot.root !== first.root,
+            )
+        ) {
+            throw new Error(
+                "The selected files belong to different Git snapshots. Reopen their changes.",
+            );
+        }
+        const contents = snapshots.map((snapshot, index) => {
+            const ids = selections[index].lineIds;
+            if (!ids.length) throw new Error("Select changes in every partial-commit file.");
+            const content = selectedContent(snapshot.view.base, snapshot.view.blocks, ids);
+            assertContentSize(content);
+            return content;
+        });
+        if (
+            contents.reduce((sum, content) => sum + Buffer.byteLength(content), 0) >
+            MAX_COMMIT_BYTES
+        ) {
+            throw new Error("The selected commit exceeds its text budget.");
+        }
+        return this.executor.runWithinMutationGate(async () => {
+            await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+            const directory = await mkdtemp(path.join(tmpdir(), "intelligit-partial-commit-"));
+            try {
+                const selectedIndex = path.join(directory, "selected-index");
+                const reconciledIndex = path.join(directory, "reconciled-index");
+                await this.executor.runBinary(["read-tree", first.head], {
+                    env: { GIT_INDEX_FILE: selectedIndex },
+                });
+                await copyFile(first.indexPath, reconciledIndex);
+                await this.materializeIndex(reconciledIndex);
+                for (const [index, snapshot] of snapshots.entries()) {
+                    const fileDirectory = path.join(directory, String(index));
+                    const retained = await this.reconcileText(
+                        fileDirectory,
+                        snapshot,
+                        contents[index],
+                    );
+                    await this.writeBlob(selectedIndex, snapshot, contents[index]);
+                    await this.writeBlob(reconciledIndex, snapshot, retained);
+                }
+                const expectedTree = await this.treeOf(selectedIndex);
+                const parentTree = (
+                    await this.executor.run(["rev-parse", `${first.head}^{tree}`])
+                ).trim();
+                if (expectedTree === parentTree)
+                    throw new Error("The selection does not change the commit tree.");
+                const commit = await preparePartialCommit(
+                    this.executor,
+                    first,
+                    selectedIndex,
+                    directory,
+                    message,
+                    expectedTree,
+                );
+                await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+                await publishPartialIndex(
+                    this.executor,
+                    first,
+                    reconciledIndex,
+                    commit,
+                    async () => {
+                        await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+                    },
+                    faults,
+                );
+                this.clear();
+                return commit;
+            } finally {
+                await rm(directory, { recursive: true, force: true });
+            }
+        });
+    }
+
+    /** Pending reconciliation is replayed only under the same repository mutation gate. */
+    async recover(): Promise<boolean> {
+        return this.executor.runWithinMutationGate(async () => {
+            const root = await realpath(this.root);
+            const actual = await realpath(
+                (await this.executor.run(["rev-parse", "--show-toplevel"])).trim(),
+            );
+            if (actual !== root) throw new Error("The repository changed.");
+            const gitDir = await realpath(
+                (await this.executor.run(["rev-parse", "--absolute-git-dir"])).trim(),
+            );
+            const recovered = await recoverPartialIndexes(this.executor, root, gitDir);
+            if (recovered) this.clear();
+            return recovered;
+        });
+    }
+
+    private clear(): void {
+        this.snapshots.clear();
+        this.bytes = 0;
+    }
+
+    private async assertCurrent(
+        snapshots: readonly PartialFileSnapshot[],
+        guard: DirtyBufferGuard,
+    ): Promise<void> {
+        await guard(snapshots.map((snapshot) => snapshot.view.path));
+        await assertPartialSnapshotCurrent(this.executor, snapshots[0]);
+        await mapWithConcurrency(snapshots.slice(1), 6, (snapshot) =>
+            assertPartialSnapshotCurrent(this.executor, snapshot, false),
+        );
+        await guard(snapshots.map((snapshot) => snapshot.view.path));
+    }
+
+    private async materializeIndex(index: string): Promise<void> {
+        await this.executor.runBinary(["update-index", "--no-split-index"], {
+            env: { GIT_INDEX_FILE: index },
+        });
+    }
+
+    private async treeOf(index: string): Promise<string> {
+        const result = await this.executor.runBinary(["write-tree"], {
+            env: { GIT_INDEX_FILE: index },
+        });
+        return result.stdout.toString("utf8").trim();
+    }
+
+    private async writeBlob(
+        index: string,
+        snapshot: PartialFileSnapshot,
+        content: string,
+    ): Promise<void> {
+        assertContentSize(content);
+        const hash = await this.executor.runBinary(["hash-object", "-w", "--stdin"], {
+            input: Buffer.from(content),
+        });
+        await this.executor.runBinary(
+            [
+                "--literal-pathspecs",
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                snapshot.mode,
+                hash.stdout.toString("utf8").trim(),
+                snapshot.view.path,
+            ],
+            { env: { GIT_INDEX_FILE: index } },
+        );
+    }
+
+    private async reconcileText(
+        directory: string,
+        snapshot: PartialFileSnapshot,
+        selected: string,
+    ): Promise<string> {
+        if (snapshot.indexed === snapshot.view.base || snapshot.indexed === selected)
+            return selected;
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        const selectedPath = path.join(directory, "selected");
+        const basePath = path.join(directory, "base");
+        const indexPath = path.join(directory, "indexed");
+        await Promise.all([
+            writeFile(selectedPath, selected, { mode: 0o600 }),
+            writeFile(basePath, snapshot.view.base, { mode: 0o600 }),
+            writeFile(indexPath, snapshot.indexed, { mode: 0o600 }),
+        ]);
+        const result = await this.executor.runBinary(
+            ["merge-file", "-p", "--", selectedPath, basePath, indexPath],
+            { expectedExitCodes: [0, 1], maxOutputBytes: MAX_PARTIAL_TEXT_BYTES },
+        );
+        if (result.exitCode !== 0 || result.truncated) {
+            throw new Error(
+                "The selection overlaps different staged content. Review the index before committing.",
+            );
+        }
+        const content = result.stdout.toString("utf8");
+        assertContentSize(content);
+        return content;
+    }
+}
+
+function snapshotBytes(snapshot: PartialFileSnapshot): number {
+    return (
+        Buffer.byteLength(snapshot.view.base) +
+        Buffer.byteLength(snapshot.indexed) +
+        Buffer.byteLength(snapshot.working) +
+        Buffer.byteLength(JSON.stringify(snapshot.view.blocks))
+    );
+}
+
+function assertContentSize(content: string): void {
+    if (Buffer.byteLength(content, "utf8") > MAX_PARTIAL_TEXT_BYTES || content.includes("\0")) {
+        throw new Error("The selected result exceeds the supported text size.");
+    }
+}
