@@ -40,6 +40,7 @@ import {
     type MergeDraft,
     type MergeWorkbenchInbound,
     type MergeWorkbenchOutbound,
+    type MergeViewState,
 } from "../../protocol/mergeWorkbench";
 import type { MergeEditorData } from "./types";
 import { t } from "../shared/i18n";
@@ -83,12 +84,16 @@ export function useWorkbenchEditors(
         layout,
         keymap,
         onActiveFromCaret,
+        presentation,
+        restoreView,
     }: {
         findHost: RefObject<HTMLElement | null>;
         scrollHandler: RefObject<WorkbenchScrollHandler | null>;
         layout: RefObject<(() => void) | null>;
         keymap: RefObject<WorkbenchKeyCommands | null>;
         onActiveFromCaret: Dispatch<SetStateAction<number | null>>;
+        presentation?: RefObject<MergeViewState | null>;
+        restoreView?: (view: MergeViewState) => void;
     },
 ) {
     const [data] = useState(inputData);
@@ -112,6 +117,10 @@ export function useWorkbenchEditors(
     const dirtyDraft = useRef(false);
     const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const latestDraft = useRef<MergeDraft | null>(null);
+    const draftReady = useRef(false);
+    const textTouched = useRef(false);
+    const viewTouched = useRef(false);
+    const closed = useRef(false);
     const theme = useDiffSyntaxTheme();
     const initialTheme = useRef(theme);
     const activeFromCaret = useRef(onActiveFromCaret);
@@ -121,15 +130,17 @@ export function useWorkbenchEditors(
 
     const flushDraft = useCallback(() => {
         clearTimeout(saveTimer.current);
-        if (applied.current) return;
+        if (applied.current || closed.current) return;
+        // A view-only interaction must not overwrite a recovery draft still loading from the host.
+        if (!draftReady.current && !textTouched.current && !latestDraft.current) return;
         const view = editors.current[1]?.view;
-        if (dirtyDraft.current && view) {
+        if (view && (dirtyDraft.current || presentation?.current)) {
             latestDraft.current = {
                 snapshotId: data.workbench!.snapshotId,
                 content: view.state.doc.toString(),
                 hunks: view.state
                     .field(workbenchHunks)
-                    .map(({ id, from, to, resolved, decision, edited, dismissed }) => ({
+                    .map(({ id, from, to, resolved, decision, edited, dismissed, reviewed }) => ({
                         id,
                         from,
                         to,
@@ -138,8 +149,18 @@ export function useWorkbenchEditors(
                         edited,
                         dismissedOurs: dismissed.ours,
                         dismissedTheirs: dismissed.theirs,
+                        ...(reviewed !== undefined ? { reviewed } : {}),
                     })),
                 ignoreWhitespace: view.state.field(groupingField).ignoreWhitespace,
+                ...(presentation?.current
+                    ? {
+                          view: {
+                              ...presentation.current,
+                              anchor: view.state.selection.main.anchor,
+                              head: view.state.selection.main.head,
+                          },
+                      }
+                    : {}),
             };
             dirtyDraft.current = false;
             getVsCodeApi().setState(latestDraft.current);
@@ -150,9 +171,21 @@ export function useWorkbenchEditors(
                 draft: latestDraft.current,
                 revision: revision.current,
             });
-    }, [data]);
+    }, [data, presentation]);
+    const scheduleDraft = useCallback(() => {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(flushDraft, 250);
+    }, [flushDraft]);
+    const savePresentation = useCallback(() => {
+        if (restoring.current || applied.current || closed.current) return;
+        viewTouched.current = true;
+        revision.current++;
+        dirtyDraft.current = true;
+        scheduleDraft();
+    }, [scheduleDraft]);
     const update = useCallback(
         (view: EditorView) => {
+            if (closed.current) return;
             const current = view.state.field(workbenchHunks);
             setHunks([...current]);
             const currentGrouping = view.state.field(groupingField);
@@ -167,16 +200,17 @@ export function useWorkbenchEditors(
                 canRedo: redoDepth(view.state) > 0,
             });
             if (restoring.current) return;
+            textTouched.current = true;
             revision.current++;
             setSaved(false);
             dirtyDraft.current = true;
-            clearTimeout(saveTimer.current);
-            saveTimer.current = setTimeout(flushDraft, 250);
+            scheduleDraft();
         },
-        [flushDraft],
+        [scheduleDraft],
     );
 
     useEffect(() => {
+        closed.current = false;
         const input = data.workbench!;
         const contents = [input.ours, initial.content, input.theirs, input.base];
         const labels = [
@@ -198,6 +232,7 @@ export function useWorkbenchEditors(
                 layout: pane < 3 ? layout : undefined,
                 keymap: pane === 1 ? keymap : undefined,
                 findHost: pane === 1 ? (findHost.current ?? undefined) : undefined,
+                selectionChanged: pane === 1 ? savePresentation : undefined,
             }),
         );
         editors.current = views;
@@ -243,7 +278,7 @@ export function useWorkbenchEditors(
                 setStaleDraft(draft);
                 return;
             }
-            if (revision.current > 0 || latestDraft.current) return;
+            if (textTouched.current || latestDraft.current) return;
             const view = views[1].view;
             const regroup =
                 draft.ignoreWhitespace !== undefined &&
@@ -260,13 +295,24 @@ export function useWorkbenchEditors(
             views[1].view.dispatch({
                 changes: { from: 0, to: views[1].view.state.doc.length, insert: draft.content },
                 effects: replaceHunks.of(ranges),
+                ...(draft.view && !viewTouched.current
+                    ? { selection: { anchor: draft.view.anchor, head: draft.view.head } }
+                    : {}),
                 annotations: Transaction.addToHistory.of(false),
             });
             restoring.current = false;
             // Only a regroup invalidates the selection's hunk index.
-            activeFromCaret.current((previous) =>
-                resolveActiveHunk(ranges, regroup ? null : previous),
-            );
+            activeFromCaret.current((previous) => {
+                const restored =
+                    draft.view && !viewTouched.current
+                        ? ranges.findIndex((hunk) => hunk.id === draft.view!.activeId)
+                        : -1;
+                return resolveActiveHunk(
+                    ranges,
+                    restored >= 0 ? restored : regroup ? null : previous,
+                );
+            });
+            if (draft.view && !viewTouched.current) restoreView?.(draft.view);
             latestDraft.current = draft;
             getVsCodeApi().setState(draft);
         };
@@ -275,7 +321,14 @@ export function useWorkbenchEditors(
         const receive = (event: MessageEvent<MergeWorkbenchInbound>) => {
             if (applied.current) return;
             const message = event.data;
-            if (message.type === "mergeDraft") restore(message.draft);
+            if (message.type === "mergeDraft") {
+                restore(message.draft);
+                draftReady.current = true;
+                if (viewTouched.current) {
+                    dirtyDraft.current = true;
+                    scheduleDraft();
+                }
+            }
             if (message.type === "mergeDraftSaved" && message.revision === revision.current)
                 setSaved(true);
             if (message.type === "resolutionError") {
@@ -295,11 +348,26 @@ export function useWorkbenchEditors(
         getVsCodeApi<MergeWorkbenchOutbound>().postMessage({ type: "loadMergeDraft" });
         return () => {
             flushDraft();
+            closed.current = true;
+            clearTimeout(saveTimer.current);
             window.removeEventListener("message", receive);
             window.removeEventListener("pagehide", flushDraft);
             for (const editor of views) editor.view.destroy();
         };
-    }, [data, initial, update, flushDraft, actions, findHost, scrollHandler, layout, keymap]);
+    }, [
+        data,
+        initial,
+        update,
+        flushDraft,
+        actions,
+        findHost,
+        scrollHandler,
+        layout,
+        keymap,
+        savePresentation,
+        scheduleDraft,
+        restoreView,
+    ]);
 
     useEffect(() => {
         editors.current.forEach(({ view }) =>
@@ -369,5 +437,6 @@ export function useWorkbenchEditors(
         flushDraft,
         isPristine,
         regroup,
+        savePresentation,
     };
 }

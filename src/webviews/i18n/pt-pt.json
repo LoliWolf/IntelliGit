@@ -1,4 +1,23 @@
 {
+    "merge.flow.options": "Opções de visualização",
+    "merge.flow.navigation": "Navegar",
+    "merge.flow.conflicts": "Todos os conflitos",
+    "merge.flow.changes": "Todas as alterações",
+    "merge.flow.pending": "Conflitos não resolvidos",
+    "merge.flow.automatic": "Fusões automáticas",
+    "merge.flow.advance": "Próximo conflito após uma decisão",
+    "merge.flow.wrap": "Quebra de linha",
+    "merge.flow.collapse": "Recolher regiões inalteradas",
+    "merge.flow.context": "Linhas de contexto",
+    "merge.flow.highlight": "Realce",
+    "merge.flow.lines": "Linhas",
+    "merge.flow.words": "Palavras",
+    "merge.flow.characters": "Caracteres",
+    "merge.flow.reviewed": "Fusão automática revista",
+    "merge.flow.saveNext": "Aplicar e abrir o próximo ficheiro",
+    "merge.flow.compare": "Comparar com a base",
+    "merge.flow.files": "Ficheiros em conflito",
+    "merge.flow.resolved": "Resolvido",
     "shelf.health.oneWarning": "A prateleira tem 1 aviso.",
     "shelf.health.manyWarnings": "A prateleira tem avisos {count}.",
     "shelf.health.details": "Detalhes",
@@ -429,5 +448,8 @@
     "merge.workbench.native": "Abrir no VS Code",
     "merge.workbench.regroupNotice": "Alterar o tratamento dos espaços em branco reconstrói o resultado. As suas edições e decisões são substituídas (Desfazer restaura-as).",
     "merge.workbench.regroupApply": "Reconstruir resultado",
-    "merge.workbench.regroupKeep": "Manter resultado atual"
+    "merge.workbench.regroupKeep": "Manter resultado atual",
+    "merge.flow.compareOurs": "Base vs. nossa versão",
+    "merge.flow.compareTheirs": "Base vs. versão entrante",
+    "merge.flow.compareResult": "Base vs. resultado"
 }

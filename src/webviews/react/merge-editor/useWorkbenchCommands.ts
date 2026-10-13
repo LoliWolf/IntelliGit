@@ -14,6 +14,8 @@ import {
     dismissSide,
     replaceHunks,
     resultContent,
+    navigationIndices,
+    nextNavigationIndex,
     type MergeChoice,
 } from "./workbenchModel";
 import { hunkView } from "./workbenchRows";
@@ -22,6 +24,7 @@ import type { useWorkbenchEditors } from "./useWorkbenchEditors";
 import { getVsCodeApi } from "../shared/vscodeApi";
 import type { OutboundMessage } from "./types";
 import type { MergeWorkbenchOutbound } from "../../protocol/mergeWorkbench";
+import { DEFAULT_MERGE_VIEW_SETTINGS, type MergeViewSettings } from "../../protocol/mergeWorkbench";
 
 type CommandOptions = Pick<
     ReturnType<typeof useWorkbenchEditors>,
@@ -31,6 +34,7 @@ type CommandOptions = Pick<
     setActive: Dispatch<SetStateAction<number | null>>;
     actions: MutableRefObject<HunkActionCallbacks | null>;
     jumpTo: (index: number) => void;
+    settings?: MergeViewSettings;
 };
 
 const abort = () => getVsCodeApi<OutboundMessage>().postMessage({ type: "abortMerge" });
@@ -52,6 +56,7 @@ export function useWorkbenchCommands({
     setActive,
     actions,
     jumpTo,
+    settings = DEFAULT_MERGE_VIEW_SETTINGS,
 }: CommandOptions) {
     const selected = active === null ? undefined : hunks[active];
     const { conflictIndices, unresolvedIndices } = conflictHunkIndices(hunks);
@@ -69,7 +74,11 @@ export function useWorkbenchCommands({
     );
 
     const resolve = useCallback(
-        (choice: MergeChoice, selectedIndex = active, { focus = true } = {}) => {
+        (
+            choice: MergeChoice,
+            selectedIndex = active,
+            { focus = true, advance = settings.advance } = {},
+        ) => {
             const target = selectedIndex === null ? undefined : hunks[selectedIndex];
             const view = editors.current[1]?.view;
             if (!view || !target || selectedIndex === null || busy) return;
@@ -78,9 +87,17 @@ export function useWorkbenchCommands({
                 selection: { anchor: target.from },
             });
             if (focus) view.focus();
+            if (advance && target.conflict) {
+                const next = nextNavigationIndex(
+                    unresolvedIndices.filter((index) => index !== selectedIndex),
+                    selectedIndex,
+                    1,
+                );
+                if (next !== undefined) jump(next);
+            }
             return true;
         },
-        [active, busy, data, editors, hunks, setActive],
+        [active, busy, data, editors, hunks, setActive, settings.advance, unresolvedIndices, jump],
     );
     const resolveFromKeyboard = (choice: MergeChoice) => {
         const target = active ?? unresolvedIndices[0] ?? -1;
@@ -91,7 +108,7 @@ export function useWorkbenchCommands({
             hunk.segment.changeKind !== "conflict"
         )
             return;
-        if (!resolve(choice, target, { focus: false })) return;
+        if (!resolve(choice, target, { focus: false, advance: false })) return;
         const targetPos = conflictIndices.indexOf(target);
         const ordered = [
             ...conflictIndices.slice(targetPos + 1),
@@ -149,8 +166,30 @@ export function useWorkbenchCommands({
                 userEvent: "input.merge",
                 annotations: isolateHistory.of("full"),
             });
+        if (settings.advance && selected && !selected.resolved) {
+            const next = nextNavigationIndex(
+                unresolvedIndices.filter((index) => index !== active),
+                active,
+                1,
+            );
+            if (next !== undefined) jump(next);
+        }
     };
-    const apply = () => {
+    const reviewAutomatic = () => {
+        const result = editors.current[1]?.view;
+        if (!result || !selected || busy || selected.segment.autoResolvedLines === undefined)
+            return;
+        result.dispatch({
+            effects: replaceHunks.of(
+                hunks.map((hunk) =>
+                    hunk.id === selected.id ? { ...hunk, reviewed: !hunk.reviewed } : hunk,
+                ),
+            ),
+            userEvent: "input.merge",
+            annotations: isolateHistory.of("full"),
+        });
+    };
+    const apply = (openNext = false) => {
         const result = editors.current[1]?.view;
         if (!result || pending || busy) return;
         flushDraft();
@@ -160,6 +199,7 @@ export function useWorkbenchCommands({
             type: "applyResolution",
             snapshotId: data.workbench!.snapshotId,
             content: resultContent(result.state.doc, data),
+            ...(openNext ? { openNext: true } : {}),
         });
     };
     const close = () => {
@@ -167,10 +207,11 @@ export function useWorkbenchCommands({
         getVsCodeApi<OutboundMessage>().postMessage({ type: "close" });
     };
     const moveActive = (delta: -1 | 1) => {
-        if (!conflictIndices.length) return;
-        const current = conflictIndices.indexOf(active ?? -1);
-        const start = current === -1 ? (delta > 0 ? -1 : 0) : current;
-        jump(conflictIndices[(start + delta + conflictIndices.length) % conflictIndices.length]);
+        const indices = navigationIndices(hunks, settings.navigation);
+        const start =
+            settings.navigation === "conflicts" && !indices.includes(active ?? -1) ? null : active;
+        const next = nextNavigationIndex(indices, start, delta);
+        if (next !== undefined) jump(next);
     };
     const acceptAll = (side: "ours" | "theirs") => {
         const view = editors.current[1]?.view;
@@ -210,6 +251,17 @@ export function useWorkbenchCommands({
     const jumpUnresolved = () => {
         if (nextUnresolved !== undefined) jump(nextUnresolved);
     };
+    const compare = (side: "ours" | "theirs" | "result") => {
+        const result = editors.current[1]?.view;
+        if (!result || busy) return;
+        flushDraft();
+        getVsCodeApi<MergeWorkbenchOutbound>().postMessage({
+            type: "compareMergeVersion",
+            snapshotId: data.workbench!.snapshotId,
+            side,
+            ...(side === "result" ? { content: resultContent(result.state.doc, data) } : {}),
+        });
+    };
     return {
         selected,
         currentConflictIndex: conflictIndices.indexOf(active ?? -1) + 1,
@@ -219,6 +271,8 @@ export function useWorkbenchCommands({
         resolve,
         resolveFromKeyboard,
         markResolved,
+        reviewAutomatic,
+        compare,
         apply,
         close,
         moveActive,

@@ -15,15 +15,26 @@ import { Workbench } from "./pageObjects/workbench";
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 /** Opens the real command and row rather than injecting merge payloads. */
-async function openMerge(page: Page, reuseVisibleSession = false): Promise<FrameLocator> {
+async function openMerge(
+    page: Page,
+    reuseVisibleSession = false,
+    fileCount = 1,
+    filePath?: string,
+): Promise<FrameLocator> {
     const view = new IntelliGitView(page);
     if (!reuseVisibleSession) await new Workbench(page).runCommand("Open Conflict Session");
+    else
+        await page
+            .getByRole("tab")
+            .filter({ hasText: /^Conflicts$/ })
+            .click();
     const session = await view.revealConflictSession();
     await expect(session.locator(".session-root")).toBeVisible();
-    await expect(session.locator("tbody tr.row")).toHaveCount(1);
+    await expect(session.locator("tbody tr.row")).toHaveCount(fileCount);
     // Rows open on one click; a double click can land its second click on the revealed tab.
-    await session.locator("tbody tr.row").click();
-    const frame = await view.revealMergeWorkbench();
+    const rows = session.locator("tbody tr.row");
+    await (filePath ? rows.filter({ hasText: filePath }) : rows).click();
+    const frame = await view.revealMergeWorkbench(undefined, filePath);
     await expect(frame.locator(".merge-editor.workbench")).toBeVisible();
     return frame;
 }
@@ -44,6 +55,187 @@ async function acceptOurs(frame: FrameLocator): Promise<void> {
 
 test.describe("Full-document Git merge workbench", () => {
     test.use({ scenario: "conflicted" });
+    test("reviews automatic changes, preserves reading state and stages two files in sequence", async ({
+        fixtureWorkspace,
+    }, testInfo) => {
+        const { workspace } = fixtureWorkspace;
+        await runGit(workspace.root, ["merge", "--abort"], workspace.env);
+        const common = Array.from({ length: 30 }, (_, index) => `// context ${index}\n`).join("");
+        const base = `${common}const a = 1, b = 1;\n${common}const choice = "base";\n${common}`;
+        const files = ["flow-first.ts", "flow-second.ts"];
+        for (const file of files) await writeFile(path.join(workspace.root, file), base);
+        await runGit(workspace.root, ["add", "--", ...files], workspace.env);
+        await runGit(workspace.root, ["commit", "-m", "Flow base"], workspace.env);
+        const branch = (
+            await runGit(workspace.root, ["branch", "--show-current"], workspace.env)
+        ).trim();
+        await runGit(workspace.root, ["checkout", "-b", "flow-incoming"], workspace.env);
+        for (const file of files)
+            await writeFile(
+                path.join(workspace.root, file),
+                base.replace("b = 1", "b = 2").replace('"base"', '"theirs"'),
+            );
+        await runGit(workspace.root, ["commit", "-am", "Flow incoming"], workspace.env);
+        await runGit(workspace.root, ["checkout", branch], workspace.env);
+        for (const file of files)
+            await writeFile(
+                path.join(workspace.root, file),
+                base.replace("a = 1", "a = 2").replace('"base"', '"ours"'),
+            );
+        await runGit(workspace.root, ["commit", "-am", "Flow ours"], workspace.env);
+        await runGit(workspace.root, ["merge", "flow-incoming"], workspace.env).catch(
+            () => undefined,
+        );
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const operation = await runGit(workspace.root, ["rev-parse", "MERGE_HEAD"], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            let frame = await openMerge(page, false, 2, files[0]);
+            await frame.getByRole("button", { name: "View options" }).click();
+            await frame.getByRole("checkbox", { name: "Soft wrap", exact: true }).check();
+            await frame
+                .getByRole("checkbox", { name: "Collapse unchanged regions", exact: true })
+                .check();
+            await frame
+                .getByRole("combobox", { name: "Highlight", exact: true })
+                .selectOption("character");
+            await frame
+                .getByRole("combobox", { name: "Navigate", exact: true })
+                .selectOption("automatic");
+            await frame.getByRole("button", { name: "Next conflict", exact: true }).click();
+            await frame.getByRole("checkbox", { name: "Reviewed automatic merge" }).check();
+            await frame.getByRole("button", { name: "Undo", exact: true }).click();
+            await expect(
+                frame.getByRole("checkbox", { name: "Reviewed automatic merge" }),
+            ).not.toBeChecked();
+            await frame.getByRole("combobox", { name: "Resolve change" }).selectOption("base");
+            await expect(frame.locator(".pane-result .cm-content")).toContainText("a = 1, b = 1");
+            await frame.getByRole("button", { name: "Undo", exact: true }).click();
+            await expect(frame.locator(".pane-result .cm-content")).toContainText("a = 2, b = 2");
+            await frame
+                .getByRole("combobox", { name: "Navigate", exact: true })
+                .selectOption("unresolved");
+            await frame.getByRole("checkbox", { name: "Next conflict after a decision" }).check();
+            await frame.getByRole("button", { name: "Next conflict", exact: true }).click();
+            await frame.locator(".pane-result .cm-line.mrow-active").click();
+            await frame.locator(".pane-result .cm-content").press("Control+Alt+1");
+            await expect(
+                page.getByRole("tab").filter({ hasText: `Merge: ${files[0]}` }),
+            ).toHaveAttribute("aria-selected", "true");
+            await expect(frame.locator(".merge-editor.workbench")).toBeVisible();
+            await expect(frame.locator("#merge-remaining-status")).toHaveText(
+                "All conflicts resolved",
+            );
+            const chosen = await frame.locator(".pane-result .cm-content").innerText();
+            await frame.getByRole("button", { name: "Conflicts", exact: true }).click();
+            await frame
+                .locator(".workbench-file-queue button")
+                .filter({ hasText: files[1] })
+                .click();
+            const other = await new IntelliGitView(page).revealMergeWorkbench(undefined, files[1]);
+            await expect(other.locator(".pane-meta-center")).toContainText(files[1]);
+            await page
+                .getByRole("tab")
+                .filter({ hasText: `Merge: ${files[0]}` })
+                .click();
+            frame = await new IntelliGitView(page).revealMergeWorkbench(undefined, files[0]);
+            await frame.getByRole("button", { name: "Base", exact: true }).click();
+            const before = await runGit(workspace.root, ["ls-files", "-u"], workspace.env);
+            const baseComparison = frame.getByRole("combobox", { name: "Compare with base" });
+            await expect(baseComparison.locator("option")).toHaveText([
+                "Compare with base",
+                "Base vs Yours",
+                "Base vs Theirs",
+                "Base vs Result",
+            ]);
+            await baseComparison.selectOption({ label: "Base vs Result" });
+            const diff = await new IntelliGitView(page).revealDiffViewer();
+            await expect(diff.locator('[data-testid="diff-viewer-root"]')).toBeVisible();
+            await expect(diff.getByLabel("This side is read only", { exact: true })).toHaveCount(2);
+            const readOnlyResult = diff.locator('[data-testid="diff-pane-right"]');
+            const comparison = await readOnlyResult.innerText();
+            await readOnlyResult.click();
+            await readOnlyResult.pressSequentially("must not edit");
+            await expect.poll(() => readOnlyResult.innerText()).toBe(comparison);
+            await expect(diff.locator("body")).toContainText("Result");
+            expect(await runGit(workspace.root, ["ls-files", "-u"], workspace.env)).toBe(before);
+            await page
+                .getByRole("tab")
+                .filter({ hasText: `Merge: ${files[0]}` })
+                .click();
+            frame = await new IntelliGitView(page).revealMergeWorkbench();
+            await frame.getByRole("button", { name: "Cancel", exact: true }).click();
+            frame = await openMerge(page, true, 2, files[0]);
+            await expect
+                .poll(() => frame.locator(".pane-result .cm-content").innerText())
+                .toBe(chosen);
+            await frame.getByRole("button", { name: "View options" }).click();
+            await expect(
+                frame.getByRole("checkbox", { name: "Soft wrap", exact: true }),
+            ).toBeChecked();
+            await expect(
+                frame.getByRole("combobox", { name: "Navigate", exact: true }),
+            ).toHaveValue("unresolved");
+            await expect(frame.locator(".pane-result .cm-foldPlaceholder")).toHaveCount(3);
+            await page.screenshot({ path: testInfo.outputPath("flow-reading-restored.png") });
+            const applyNext = frame.getByRole("button", { name: "Apply and next", exact: true });
+            await expect(applyNext).toHaveText("Apply and next");
+            await applyNext.click();
+            await expect
+                .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
+                .not.toContain(files[0]);
+            await expect(
+                page.getByRole("tab").filter({ hasText: `Merge: ${files[0]}` }),
+            ).toHaveCount(0);
+            await expect(
+                page.getByRole("tab").filter({ hasText: `Merge: ${files[1]}` }),
+            ).toHaveAttribute("aria-selected", "true");
+            frame = await new IntelliGitView(page).revealMergeWorkbench(undefined, files[1]);
+            await expect(frame.locator(".pane-meta-row")).toContainText(files[1]);
+            const stages = await runGit(workspace.root, ["ls-files", "-u"], workspace.env);
+            expect(stages).toContain(files[1]);
+            expect(stages).not.toContain(files[0]);
+            await frame.getByRole("button", { name: "Conflicts", exact: true }).click();
+            await frame
+                .locator(".workbench-file-queue button")
+                .filter({ hasText: files[0] })
+                .click();
+            const review = await new IntelliGitView(page).revealDiffViewer();
+            await expect(review.locator("body")).toContainText("Merged and staged");
+            await expect(review.getByLabel("This side is read only", { exact: true })).toHaveCount(
+                2,
+            );
+            await page
+                .getByRole("tab")
+                .filter({ hasText: `Merge: ${files[1]}` })
+                .click();
+            frame = await new IntelliGitView(page).revealMergeWorkbench();
+            await acceptOurs(frame);
+            await frame.getByRole("button", { name: "Apply and next", exact: true }).click();
+            await expect
+                .poll(() => runGit(workspace.root, ["ls-files", "-u"], workspace.env))
+                .toBe("");
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect(await runGit(workspace.root, ["rev-parse", "MERGE_HEAD"], workspace.env)).toBe(
+                operation,
+            );
+            for (const file of files)
+                expect(await runGit(workspace.root, ["show", `:${file}`], workspace.env)).toBe(
+                    await readFile(path.join(workspace.root, file), "utf8"),
+                );
+        } finally {
+            await app.close();
+        }
+    });
     test("stages a cherry-pick resolution without automatically continuing it", async ({
         fixtureWorkspace,
     }) => {

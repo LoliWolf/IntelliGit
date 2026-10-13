@@ -24,6 +24,8 @@ import {
 } from "@codemirror/view";
 import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { codeFolding } from "@codemirror/language";
+import type { MergeViewSettings } from "../../protocol/mergeWorkbench";
 import type { RefObject } from "react";
 import { actionGutter, type HunkActionCallbacks } from "./workbenchGutter";
 import {
@@ -43,6 +45,7 @@ import {
     buildWordDiffMask,
     bridgeChangedWordRuns,
     tokenizeWordDiff,
+    computeTokenLcsPairs,
 } from "../../../diff/wordDiff";
 import { LINE_HEIGHT_PX } from "../diff-core/mergeScrollLayout";
 import {
@@ -67,6 +70,10 @@ export type WorkbenchKeyCommands = {
     next(): void;
     prev(): void;
     applyIfClean(): boolean;
+    ours?(): void;
+    theirs?(): void;
+    both?(): void;
+    remove?(): void;
 };
 
 const palette = EditorView.theme({
@@ -107,6 +114,17 @@ const palette = EditorView.theme({
 
 /** Updates only syntax decorations, preserving selections and history. */
 export const setMergeSyntax = StateEffect.define<ShikiTheme>();
+
+/** Changes decoration granularity without reparsing or replacing the result document. */
+export const setMergeHighlight = StateEffect.define<MergeViewSettings["highlight"]>();
+const mergeHighlight = StateField.define<MergeViewSettings["highlight"]>({
+    create: () => "word",
+    update(value, transaction) {
+        for (const effect of transaction.effects)
+            if (effect.is(setMergeHighlight)) value = effect.value;
+        return value;
+    },
+});
 
 /** Converts TextMate's font-style flags into inline token styles without changing editor text. */
 function tokenStyle(token: { color?: string; fontStyle?: number }): string {
@@ -193,6 +211,8 @@ function wordDecorations(
     pane: WorkbenchPane,
 ): Range<Decoration>[] {
     const marks: Range<Decoration>[] = [];
+    const granularity = state.field(mergeHighlight);
+    if (granularity === "line") return marks;
     for (const hunk of hunks) {
         const compareLines = compareLinesFor(hunk, pane);
         if (compareLines === undefined) continue;
@@ -201,11 +221,19 @@ function wordDecorations(
         const compared = alignCompareLinesForWordDiff(lines, compareLines);
         let offset = hunk.from;
         lines.forEach((line, index) => {
-            const tokens = tokenizeWordDiff(line);
-            const { changed } = bridgeChangedWordRuns(
-                tokens,
-                buildWordDiffMask(line, compared[index] ?? ""),
-            );
+            const tokens = granularity === "character" ? Array.from(line) : tokenizeWordDiff(line);
+            const unchanged =
+                granularity === "character"
+                    ? new Set(
+                          computeTokenLcsPairs(tokens, Array.from(compared[index] ?? "")).map(
+                              ([a]) => a,
+                          ),
+                      )
+                    : null;
+            const changed = unchanged
+                ? tokens.map((_token, i) => !unchanged.has(i))
+                : bridgeChangedWordRuns(tokens, buildWordDiffMask(line, compared[index] ?? ""))
+                      .changed;
             tokens.forEach((token, i) => {
                 if (changed[i] && offset + token.length <= state.doc.length)
                     marks.push(
@@ -352,7 +380,8 @@ function rowField(pane: WorkbenchPane) {
                     (effect) =>
                         effect.is(replaceHunks) ||
                         effect.is(setInputHunks) ||
-                        effect.is(setActiveHunk),
+                        effect.is(setActiveHunk) ||
+                        effect.is(setMergeHighlight),
                 )
             )
                 return value;
@@ -381,15 +410,24 @@ export function createMergeCodeEditor(
         keymap?: RefObject<WorkbenchKeyCommands | null>;
         findHost?: HTMLElement;
         update?: (view: EditorView) => void;
+        selectionChanged?: () => void;
     },
-): { view: EditorView; setReadOnly: (readOnly: boolean) => void } {
+): {
+    view: EditorView;
+    setReadOnly: (readOnly: boolean) => void;
+    setWrapping: (wrap: boolean) => void;
+} {
     if (options.pane === "result" && !options.findHost)
         throw new Error("merge-workbench: find host is missing");
     const editability = new Compartment();
+    const wrapping = new Compartment();
     const state = EditorState.create({
         doc: content.replace(/\r\n/g, "\n"),
         extensions: [
             palette,
+            wrapping.of([]),
+            codeFolding(),
+            mergeHighlight,
             options.pane === "ours" && options.actions
                 ? actionGutter("ours", options.actions, (state) => state.field(inputHunks), "after")
                 : [],
@@ -423,6 +461,17 @@ export function createMergeCodeEditor(
                               key: "Mod-Enter",
                               run: () => options.keymap?.current?.applyIfClean() ?? false,
                           },
+                          ...(["ours", "theirs", "both", "remove"] as const).map(
+                              (command, index) => ({
+                                  key: ["Ctrl-Alt-1", "Ctrl-Alt-2", "Ctrl-Alt-3", "Ctrl-Alt-0"][
+                                      index
+                                  ],
+                                  run: () => {
+                                      options.keymap?.current?.[command]?.();
+                                      return true;
+                                  },
+                              }),
+                          ),
                       ]),
                   )
                 : [],
@@ -456,6 +505,7 @@ export function createMergeCodeEditor(
                       }),
                   ]),
             EditorView.updateListener.of((update) => {
+                if (update.selectionSet) options.selectionChanged?.();
                 if (
                     update.docChanged ||
                     update.transactions.some((transaction) =>
@@ -476,5 +526,7 @@ export function createMergeCodeEditor(
                     EditorView.editable.of(!readOnly),
                 ]),
             }),
+        setWrapping: (wrap) =>
+            view.dispatch({ effects: wrapping.reconfigure(wrap ? EditorView.lineWrapping : []) }),
     };
 }

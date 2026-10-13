@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.2] - 2026-10-12
+
+### Added
+
+- Filter merge navigation to conflicts, changes, unresolved blocks or automatic changes, and optionally advance after a resolution decision.
+- Read merge files with soft wrap, synchronized folding, adjustable context lines and line, word or character highlighting. Compare Base with Yours, Theirs or the current Result.
+- Review a repository's conflicted files in sequence with saved per-file reading and navigation state, automatic-change review and a saved-result preview.
+
+### Changed
+
+- The merge editor shows an explicit **Apply and next** button and names Base comparisons **Base vs Yours**, **Base vs Theirs** and **Base vs Result**.
+
+### Fixed
+
+- Merge result size validation measures UTF-8 bytes so non-ASCII results respect the existing size limit.
+- Merge-editor visual checks wait for settled caret scrolling and verify the requested offsets before checking clipping at each edge.
+
+
 ## [0.37.1] - 2026-10-10
 
 ### Changed

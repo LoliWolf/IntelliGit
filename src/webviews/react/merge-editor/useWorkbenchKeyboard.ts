@@ -37,6 +37,10 @@ export function useWorkbenchKeyboard(
         keymap.current = {
             next: () => commands.moveActive(1),
             prev: () => commands.moveActive(-1),
+            ours: () => commands.resolveFromKeyboard("ours"),
+            theirs: () => commands.resolveFromKeyboard("theirs"),
+            both: () => commands.resolveFromKeyboard("both"),
+            remove: () => commands.resolveFromKeyboard("none"),
             applyIfClean: () => {
                 if (unresolved !== 0) return false;
                 commands.apply();

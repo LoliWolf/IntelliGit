@@ -1,4 +1,23 @@
 {
+    "merge.flow.options": "보기 옵션",
+    "merge.flow.navigation": "이동",
+    "merge.flow.conflicts": "모든 충돌",
+    "merge.flow.changes": "모든 변경 사항",
+    "merge.flow.pending": "해결되지 않은 충돌",
+    "merge.flow.automatic": "자동 병합",
+    "merge.flow.advance": "결정 후 다음 충돌로 이동",
+    "merge.flow.wrap": "자동 줄 바꿈",
+    "merge.flow.collapse": "변경되지 않은 영역 접기",
+    "merge.flow.context": "문맥 줄 수",
+    "merge.flow.highlight": "강조 표시",
+    "merge.flow.lines": "줄",
+    "merge.flow.words": "단어",
+    "merge.flow.characters": "문자",
+    "merge.flow.reviewed": "자동 병합 검토 완료",
+    "merge.flow.saveNext": "적용 후 다음 파일 열기",
+    "merge.flow.compare": "기본 버전과 비교",
+    "merge.flow.files": "충돌 파일",
+    "merge.flow.resolved": "해결됨",
     "shelf.health.oneWarning": "셸프에 경고가 1개 있습니다.",
     "shelf.health.manyWarnings": "셸프에 {count} 경고가 있습니다.",
     "shelf.health.details": "세부정보",
@@ -409,5 +428,8 @@
     "merge.workbench.native": "VS Code에서 열기",
     "merge.workbench.regroupNotice": "공백 처리 방식을 변경하면 결과가 다시 구성됩니다. 편집 내용과 선택한 해결 방식이 대체됩니다(실행 취소로 복원할 수 있습니다).",
     "merge.workbench.regroupApply": "결과 다시 구성",
-    "merge.workbench.regroupKeep": "현재 결과 유지"
+    "merge.workbench.regroupKeep": "현재 결과 유지",
+    "merge.flow.compareOurs": "기준과 내 쪽 비교",
+    "merge.flow.compareTheirs": "기준과 상대 쪽 비교",
+    "merge.flow.compareResult": "기준과 결과 비교"
 }

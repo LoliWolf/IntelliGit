@@ -68,6 +68,72 @@
 .merge-editor.workbench .merge-content .cm-content > * {
     grid-column: 1;
 }
+.merge-editor.workbench.soft-wrap .merge-content .cm-content {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: hidden;
+}
+.merge-editor.workbench.soft-wrap .cm-line {
+    overflow-wrap: anywhere;
+}
+.merge-editor.workbench.soft-wrap .merge-viewport {
+    min-width: max(100%, 640px);
+}
+.merge-editor.workbench.soft-wrap .merge-content {
+    overflow-x: auto;
+}
+.merge-editor.workbench.soft-wrap .merge-horizontal-scroll {
+    display: none;
+}
+.merge-editor.workbench .cm-foldPlaceholder {
+    color: var(--vscode-descriptionForeground);
+    background: var(--vscode-editorWidget-background);
+    border-color: var(--merge-border);
+}
+.merge-editor.workbench .workbench-flow-options {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--merge-border);
+    background: var(--merge-toolbar-bg);
+}
+.merge-editor.workbench .workbench-flow-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+}
+.merge-editor.workbench .workbench-flow-options input[type="number"] {
+    width: 48px;
+    color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background);
+    border: 1px solid var(--merge-border);
+}
+.merge-editor.workbench .workbench-file-queue {
+    max-height: 160px;
+    overflow: auto;
+    border-bottom: 1px solid var(--merge-border);
+}
+.merge-editor.workbench .workbench-file-queue button {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: 5px 10px;
+    text-align: left;
+    color: var(--merge-editor-fg);
+    background: var(--merge-editor-bg);
+    border: 0;
+    border-bottom: 1px solid var(--merge-border);
+}
+.merge-editor.workbench .workbench-file-queue button[aria-current="true"] {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+.merge-editor.workbench .workbench-file-queue .file-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
 /* Scroll geometry must reach its measured size in the same layout pass as the caret. */
 .merge-editor.workbench .merge-horizontal-scroll-inner,
 .merge-editor.workbench .merge-content .cm-content,

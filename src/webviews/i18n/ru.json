@@ -1,4 +1,23 @@
 {
+    "merge.flow.options": "Параметры просмотра",
+    "merge.flow.navigation": "Навигация",
+    "merge.flow.conflicts": "Все конфликты",
+    "merge.flow.changes": "Все изменения",
+    "merge.flow.pending": "Неразрешённые конфликты",
+    "merge.flow.automatic": "Автоматические слияния",
+    "merge.flow.advance": "Следующий конфликт после решения",
+    "merge.flow.wrap": "Перенос строк",
+    "merge.flow.collapse": "Свернуть неизменённые области",
+    "merge.flow.context": "Строки контекста",
+    "merge.flow.highlight": "Подсветка",
+    "merge.flow.lines": "Строки",
+    "merge.flow.words": "Слова",
+    "merge.flow.characters": "Символы",
+    "merge.flow.reviewed": "Автоматическое слияние проверено",
+    "merge.flow.saveNext": "Применить и открыть следующий файл",
+    "merge.flow.compare": "Сравнить с базой",
+    "merge.flow.files": "Конфликтующие файлы",
+    "merge.flow.resolved": "Разрешён",
     "shelf.health.oneWarning": "Полка имеет 1 предупреждение.",
     "shelf.health.manyWarnings": "Полка имеет предупреждения {count}.",
     "shelf.health.details": "Подробности",
@@ -439,5 +458,8 @@
     "merge.workbench.native": "Открыть в VS Code",
     "merge.workbench.regroupNotice": "Изменение обработки пробельных символов пересоздаёт результат. Ваши правки и решения заменяются (действие «Отменить» восстанавливает их).",
     "merge.workbench.regroupApply": "Пересоздать результат",
-    "merge.workbench.regroupKeep": "Сохранить текущий результат"
+    "merge.workbench.regroupKeep": "Сохранить текущий результат",
+    "merge.flow.compareOurs": "База и наша версия",
+    "merge.flow.compareTheirs": "База и входящая версия",
+    "merge.flow.compareResult": "База и результат"
 }

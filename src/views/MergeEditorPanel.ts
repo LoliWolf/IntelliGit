@@ -28,6 +28,8 @@ import {
 } from "../utils/notifications";
 import { abortMergeWithConfirmation } from "./mergeAbort";
 import { buildWebviewShellHtml } from "./webviewHtml";
+import { DiffViewerPanel } from "./DiffViewerPanel";
+import { MergeResultHistory } from "./mergeResultHistory";
 
 /**
  * Inputs required to open the native merge editor for one repository-relative file.
@@ -59,6 +61,7 @@ const MAX_APPLY_CONTENT_BYTES = 2 * 1024 * 1024;
 export class MergeEditorPanel {
     private static readonly panels = new Map<string, MergeEditorPanel>();
     private static readonly draftQueues = new Map<string, Promise<void>>();
+    private static readonly resultHistory = new MergeResultHistory();
 
     private readonly panel: vscode.WebviewPanel;
     private disposed = false;
@@ -230,22 +233,7 @@ export class MergeEditorPanel {
             }
 
             case "applyResolution": {
-                if (msg.snapshotId !== this.snapshot?.id)
-                    throw new Error(
-                        vscode.l10n.t(
-                            "The conflict session changed. Reopen the merge editor before applying.",
-                        ),
-                    );
-                const content = msg.content;
-                if (typeof content !== "string") {
-                    throw new Error(vscode.l10n.t("Merge result payload must be a string."));
-                }
-                if (content.length > MAX_APPLY_CONTENT_BYTES) {
-                    throw new Error(
-                        vscode.l10n.t("Merge result payload exceeds the supported size."),
-                    );
-                }
-                await this.applyResolvedContent(content);
+                await this.applyMessage(msg);
                 return;
             }
 
@@ -284,17 +272,71 @@ export class MergeEditorPanel {
                 return;
             }
             default:
+                await this.handleFlowMessage(msg);
                 return;
         }
     }
 
+    /** Validates the result request before invoking the existing fenced write. */
+    private async applyMessage(msg: Record<string, unknown>): Promise<void> {
+        if (msg.snapshotId !== this.snapshot?.id)
+            throw new Error(
+                vscode.l10n.t(
+                    "The conflict session changed. Reopen the merge editor before applying.",
+                ),
+            );
+        const content = msg.content;
+        if (typeof content !== "string")
+            throw new Error(vscode.l10n.t("Merge result payload must be a string."));
+        if (Buffer.byteLength(content, "utf8") > MAX_APPLY_CONTENT_BYTES)
+            throw new Error(vscode.l10n.t("Merge result payload exceeds the supported size."));
+        if (msg.openNext !== undefined && typeof msg.openNext !== "boolean") return;
+        await this.applyResolvedContent(content, msg.openNext === true);
+    }
+
+    /** Separates read-only flow commands from the fenced Apply protocol. */
+    private async handleFlowMessage(msg: Record<string, unknown>): Promise<void> {
+        switch (msg.type) {
+            case "compareMergeVersion":
+                await this.loading;
+                await this.compareVersion(msg);
+                return;
+            case "loadMergeFiles":
+                await this.loading;
+                await this.postFileQueue();
+                return;
+            case "openMergeFile": {
+                if (typeof msg.filePath !== "string" || this.applying || this.applied) return;
+                const safePath = assertRepoRelativePath(msg.filePath);
+                const files = await this.gitOps.getConflictFilesDetailed();
+                if (this.isAlive() && files.some((file) => file.path === safePath))
+                    await this.openFile(safePath);
+                return;
+            }
+            case "reviewMergeFile": {
+                if (typeof msg.filePath !== "string" || !this.snapshot) return;
+                const safePath = assertRepoRelativePath(msg.filePath);
+                const saved = MergeEditorPanel.resultHistory
+                    .list(this.repoRoot, this.snapshot.operation)
+                    .find((file) => file.path === safePath);
+                if (saved)
+                    await this.openComparison(
+                        saved.path,
+                        saved.base,
+                        saved.result,
+                        vscode.l10n.t("Merged and staged: {path}", { path: saved.path }),
+                    );
+                return;
+            }
+        }
+    }
     /**
      * Writes webview-produced merged content to the working tree and stages the file.
      *
      * The write targets the repository root captured at open time so a repository
      * switch mid-session cannot redirect the file outside the original work tree.
      */
-    private async applyResolvedContent(content: string): Promise<void> {
+    private async applyResolvedContent(content: string, openNext = false): Promise<void> {
         if (this.applying || this.applied) return;
         const snapshot = this.snapshot;
         if (!snapshot)
@@ -310,6 +352,11 @@ export class MergeEditorPanel {
                 },
             );
             this.applied = true;
+            MergeEditorPanel.resultHistory.record(this.repoRoot, snapshot.operation, {
+                path: this.safePath,
+                base: snapshot.base,
+                result: content,
+            });
             // Staging is terminal; delivery or recovery cleanup cannot reopen this session.
             try {
                 try {
@@ -332,12 +379,106 @@ export class MergeEditorPanel {
                     vscode.l10n.t("Merged and staged: {path}", { path: this.safePath }),
                 );
                 await this.notifyConflictStateChanged();
+                if (openNext && this.isAlive()) {
+                    try {
+                        const files = (await this.gitOps.getConflictFilesDetailed())
+                            .map((file) => file.path)
+                            .filter((file) => file !== this.safePath)
+                            .sort();
+                        const next = files.find((file) => file > this.safePath) ?? files[0];
+                        if (next) await this.openFile(assertRepoRelativePath(next));
+                    } catch (error) {
+                        showTimedWarningMessage(
+                            vscode.l10n.t("Failed to refresh conflict UI: {message}", {
+                                message: getErrorMessage(error),
+                            }),
+                        );
+                    }
+                }
             } finally {
                 if (this.isAlive()) this.panel.dispose();
             }
         } finally {
             this.applying = false;
         }
+    }
+
+    /** Opens a fresh file snapshot under the same captured repository facade. */
+    private openFile(filePath: string): Promise<void> {
+        return MergeEditorPanel.open({
+            extensionUri: this.extensionUri,
+            gitOps: this.gitOps,
+            getRepoRoot: () => this.repoRoot,
+            filePath,
+            onConflictStateChanged: this.onConflictStateChanged,
+            onOpenConflictSession: this.onOpenConflictSession,
+            draftStore: this.draftStore,
+        });
+    }
+
+    /** Refreshes actionable paths from Git and appends operation-scoped review snapshots. */
+    private async postFileQueue(): Promise<void> {
+        if (!this.snapshot || !this.isAlive()) return;
+        const unresolved = await this.gitOps.getConflictFilesDetailed();
+        const files = new Map(
+            unresolved.map((file) => [file.path, { path: file.path, resolved: false }]),
+        );
+        for (const file of MergeEditorPanel.resultHistory.list(
+            this.repoRoot,
+            this.snapshot.operation,
+        ))
+            if (!files.has(file.path)) files.set(file.path, { path: file.path, resolved: true });
+        if (this.isAlive())
+            await this.panel.webview.postMessage({
+                type: "mergeFileQueue",
+                files: [...files.values()].sort((a, b) =>
+                    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+                ),
+            });
+    }
+
+    /** Accepts only this panel's immutable inputs and a bounded, unsaved result for comparison. */
+    private async compareVersion(msg: Record<string, unknown>): Promise<void> {
+        if (!this.snapshot || msg.snapshotId !== this.snapshot.id || !this.isAlive()) return;
+        if (msg.side !== "ours" && msg.side !== "theirs" && msg.side !== "result") return;
+        const content = msg.side === "result" ? msg.content : this.snapshot[msg.side];
+        if (
+            typeof content !== "string" ||
+            content.includes("\0") ||
+            Buffer.byteLength(content, "utf8") > MAX_APPLY_CONTENT_BYTES
+        )
+            return;
+        const label =
+            msg.side === "ours"
+                ? this.loadedData!.oursLabel
+                : msg.side === "theirs"
+                  ? this.loadedData!.theirsLabel
+                  : vscode.l10n.t("Result");
+        await this.openComparison(this.safePath, this.snapshot.base, content, label);
+    }
+
+    /** Uses the existing read-only diff panel; no editable session delegate is attached. */
+    private openComparison(
+        filePath: string,
+        base: string,
+        content: string,
+        label: string,
+    ): Promise<void> {
+        return DiffViewerPanel.open({
+            extensionUri: this.extensionUri,
+            path: filePath,
+            leftLabel: vscode.l10n.t("Base"),
+            rightLabel: label,
+            languageId: "",
+            leftText: base,
+            rightText: content,
+            documentId: JSON.stringify([
+                this.panelKey,
+                this.snapshot?.id,
+                label,
+                createHash("sha256").update(content).digest("hex"),
+            ]),
+        });
     }
 
     /** Refuses dirty buffers even when the workspace spells the same path through an alias. */

@@ -1,4 +1,23 @@
 {
+    "merge.flow.options": "表示オプション",
+    "merge.flow.navigation": "移動",
+    "merge.flow.conflicts": "すべての競合",
+    "merge.flow.changes": "すべての変更",
+    "merge.flow.pending": "未解決の競合",
+    "merge.flow.automatic": "自動マージ",
+    "merge.flow.advance": "決定後に次の競合へ移動",
+    "merge.flow.wrap": "ソフトラップ",
+    "merge.flow.collapse": "変更のない領域を折りたたむ",
+    "merge.flow.context": "前後の行数",
+    "merge.flow.highlight": "強調表示",
+    "merge.flow.lines": "行",
+    "merge.flow.words": "単語",
+    "merge.flow.characters": "文字",
+    "merge.flow.reviewed": "自動マージを確認済み",
+    "merge.flow.saveNext": "適用して次のファイルを開く",
+    "merge.flow.compare": "ベースと比較",
+    "merge.flow.files": "競合ファイル",
+    "merge.flow.resolved": "解決済み",
     "shelf.health.oneWarning": "シェルフには警告が 1 件あります。",
     "shelf.health.manyWarnings": "シェルフには {count} の警告があります。",
     "shelf.health.details": "詳細",
@@ -409,5 +428,8 @@
     "merge.workbench.native": "VS Code で開く",
     "merge.workbench.regroupNotice": "空白の扱いを変更すると、結果が再構築されます。編集内容と選択した解決方法は置き換えられます（「元に戻す」で復元できます）。",
     "merge.workbench.regroupApply": "結果を再構築",
-    "merge.workbench.regroupKeep": "現在の結果を保持"
+    "merge.workbench.regroupKeep": "現在の結果を保持",
+    "merge.flow.compareOurs": "ベースと自分側の比較",
+    "merge.flow.compareTheirs": "ベースと受信側の比較",
+    "merge.flow.compareResult": "ベースと結果の比較"
 }

@@ -1,4 +1,23 @@
 {
+    "merge.flow.options": "檢視選項",
+    "merge.flow.navigation": "導覽",
+    "merge.flow.conflicts": "所有衝突",
+    "merge.flow.changes": "所有變更",
+    "merge.flow.pending": "未解決衝突",
+    "merge.flow.automatic": "自動合併",
+    "merge.flow.advance": "決定後跳到下一處衝突",
+    "merge.flow.wrap": "自動換行",
+    "merge.flow.collapse": "摺疊未變更區域",
+    "merge.flow.context": "前後文行數",
+    "merge.flow.highlight": "醒目提示",
+    "merge.flow.lines": "行",
+    "merge.flow.words": "詞",
+    "merge.flow.characters": "字元",
+    "merge.flow.reviewed": "已複查自動合併",
+    "merge.flow.saveNext": "套用並開啟下一個檔案",
+    "merge.flow.compare": "與基準比較",
+    "merge.flow.files": "衝突檔案",
+    "merge.flow.resolved": "已解決",
     "shelf.health.oneWarning": "擱置架有 1 個警告。",
     "shelf.health.manyWarnings": "擱置架上有 {count} 警告。",
     "shelf.health.details": "詳情",
@@ -409,5 +428,8 @@
     "merge.workbench.native": "在 VS Code 中開啟",
     "merge.workbench.regroupNotice": "變更空白字元的處理方式會重新建立結果。您的編輯與解決選擇將被取代（可透過「復原」還原）。",
     "merge.workbench.regroupApply": "重新建立結果",
-    "merge.workbench.regroupKeep": "保留目前結果"
+    "merge.workbench.regroupKeep": "保留目前結果",
+    "merge.flow.compareOurs": "基礎版本與您的版本比較",
+    "merge.flow.compareTheirs": "基礎版本與他們的版本比較",
+    "merge.flow.compareResult": "基礎版本與結果比較"
 }

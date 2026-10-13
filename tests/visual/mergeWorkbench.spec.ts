@@ -44,6 +44,7 @@ test("workbench toolbar follows main's control order", async ({ mountHarness, pa
             ["toolbar-icon-btn", "Undo"],
             ["toolbar-icon-btn", "Redo"],
             ["toolbar-icon-btn", "Find in result"],
+            ["toolbar-icon-btn", "View options"],
             ["toolbar-icon-btn", "Base"],
             ["toolbar-icon-btn", "Confirm manual resolution"],
             ["toolbar-separator", ""],

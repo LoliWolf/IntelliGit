@@ -603,6 +603,10 @@ const WEBVIEW_ENTRIES = [
     },
     { kind: "webview", id: "discardMergeDraft", mutating: true, notCovered: WEBVIEW_NOT_COVERED },
     { kind: "webview", id: "openConflictSession", mutating: false },
+    { kind: "webview", id: "compareMergeVersion", mutating: false },
+    { kind: "webview", id: "loadMergeFiles", mutating: false },
+    { kind: "webview", id: "openMergeFile", mutating: false },
+    { kind: "webview", id: "reviewMergeFile", mutating: false },
 ] satisfies readonly CoverageEntry[];
 
 /**
