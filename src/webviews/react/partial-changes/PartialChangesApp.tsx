@@ -197,7 +197,8 @@ function PartialDiff({
 
 function PartialStatus({ data, error }: { data: FileData | null; error: string }) {
     const ownership = data?.lists.changes[data.file.path];
-    const inclusion = data ? ownership?.selections?.[data.listId] : undefined;
+    const inclusion =
+        data?.file.side === "working" ? ownership?.selections?.[data.listId] : undefined;
     return (
         <>
             {error ? (
@@ -249,7 +250,9 @@ export function PartialChangesApp() {
                           ? saved.ids
                           : undefined;
                 const savedSelection =
-                    reply.lists.changes[reply.file.path]?.selections?.[reply.listId];
+                    reply.file.side === "working"
+                        ? reply.lists.changes[reply.file.path]?.selections?.[reply.listId]
+                        : undefined;
                 const initial =
                     restore ??
                     (savedSelection?.contentId === reply.contentId

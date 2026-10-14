@@ -9,8 +9,26 @@ import {
 } from "../../visual/recorder/commitInfoVscodeDouble";
 vi.mock("vscode", () => {
     const double = createCommitInfoVscodeDouble();
+    Object.defineProperty(double, "ProgressLocation", {
+        value: { Notification: 15 },
+        configurable: true,
+    });
     Object.defineProperty(double.workspace, "textDocuments", { value: [] });
     Object.defineProperty(double.workspace, "notebookDocuments", { value: [] });
+    Object.defineProperty(double.window, "showWarningMessage", {
+        value: vi.fn().mockResolvedValue(undefined),
+        configurable: true,
+    });
+    Object.defineProperty(double.window, "showQuickPick", {
+        value: vi.fn().mockResolvedValue(undefined),
+        configurable: true,
+    });
+    Object.defineProperty(double.window, "showInformationMessage", {
+        value: vi.fn().mockResolvedValue(undefined),
+    });
+    Object.defineProperty(double.window, "withProgress", {
+        value: async (_options: unknown, task: () => Promise<unknown>) => task(),
+    });
     Object.defineProperty(double.l10n, "t", {
         value: (message: string, values: Record<string, string> = {}) =>
             message.replace(/\{([^}]+)\}/g, (match, key: string) => values[key] ?? match),
@@ -34,6 +52,13 @@ let gitOps: GitOps;
 let host: ChangeWorkflowHost;
 let store: ChangelistStore;
 let posted: unknown[];
+let baselineHead: string;
+let persistenceFailure: "none" | "before" | "after";
+let values: Map<string, unknown>;
+let storage: {
+    get<T>(key: string): T | undefined;
+    update(key: string, value: unknown): Promise<void>;
+};
 const base = Array.from({ length: 100 }, (_, i) => `line ${i}\n`).join("");
 const first = base.replace("line 20\n", "selected\n");
 const working = first.replace("line 80\n", "remaining\n");
@@ -50,13 +75,20 @@ beforeEach(async () => {
     await writeFile(path.join(root, "file.txt"), base);
     git(["add", "--", "file.txt"]);
     git(["commit", "-qm", "base"]);
+    baselineHead = git(["rev-parse", "HEAD"]);
+    persistenceFailure = "none";
     await writeFile(path.join(root, "file.txt"), working);
     gitOps = new GitOps(new GitExecutor(root));
-    const values = new Map<string, unknown>();
-    const storage = {
+    values = new Map<string, unknown>();
+    storage = {
         get: <T>(key: string) => values.get(key) as T | undefined,
         update: async (key: string, value: unknown) => {
-            values.set(key, value);
+            if (
+                persistenceFailure === "before" ||
+                (persistenceFailure === "after" && git(["rev-parse", "HEAD"]) !== baselineHead)
+            )
+                throw new Error("injected metadata storage failure");
+            values.set(key, structuredClone(value));
         },
     };
     store = ChangelistStore.forStorage(storage);
@@ -177,6 +209,94 @@ describe("root-bound selected-change host", () => {
         const head = git(["rev-parse", "HEAD"]);
         await panel.receiveMessage({ type: "commitSelection", selection, message: "duplicate" });
         expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([false, true])(
+        "does not change working inclusion when unstaging index lines (saved=%s)",
+        async (saved) => {
+            git(["add", "--", "file.txt"]);
+            const { panel, selection, messages } = await partialEditor();
+            if (saved) await panel.receiveMessage({ type: "useSelection", selection });
+            const before = store.get(root);
+            await panel.receiveMessage({ type: "ready", side: "index" });
+            const indexed = messages.findLast((message) => message.type === "partialFile");
+            if (!indexed || indexed.type !== "partialFile")
+                throw new Error("Missing index snapshot");
+            await panel.receiveMessage({
+                type: "stageSelection",
+                selection: {
+                    snapshotId: indexed.file.snapshotId,
+                    lineIds: changeIds(indexed.file.blocks.slice(0, 1)),
+                },
+            });
+            expect(store.get(root)).toEqual(before);
+            expect(git(["show", ":file.txt"])).toBe(base.replace("line 80\n", "remaining\n"));
+            await host.handle({
+                type: "commitChangelist",
+                repositoryRoot: root,
+                revision: before.revision,
+                listId: "all",
+                paths: ["file.txt"],
+                message: "commit after unstage",
+            });
+            expect(posted).not.toContainEqual(expect.objectContaining({ type: "error" }));
+            expect(git(["show", "HEAD:file.txt"])).toBe(saved ? first : working);
+        },
+    );
+
+    it("refuses publication if the pre-commit inclusion fence cannot be persisted", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const index = await readFile(path.join(root, ".git/index"));
+        persistenceFailure = "before";
+        await panel.receiveMessage({
+            type: "commitSelection",
+            selection,
+            message: "must not publish",
+        });
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("metadata storage"),
+            }),
+        );
+        expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        expect(await readFile(path.join(root, "file.txt"), "utf8")).toBe(working);
+        expect(delivered).not.toHaveBeenCalled();
+    });
+
+    it("keeps a durable partial fence after a committed selection cannot be consumed", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const before = store.get(root);
+        expect(before.changes["file.txt"].selections).toBeUndefined();
+        persistenceFailure = "after";
+        await panel.receiveMessage({
+            type: "commitSelection",
+            selection,
+            message: "published once",
+        });
+        expect(messages).toContainEqual(expect.objectContaining({ type: "partialCommitted" }));
+        expect(git(["show", "HEAD:file.txt"])).toBe(first);
+        expect(posted).toContainEqual(
+            expect.objectContaining({
+                type: "error",
+                message: expect.stringContaining("commit succeeded"),
+            }),
+        );
+        const persisted = new ChangelistStore(storage).get(root);
+        expect(persisted.changes["file.txt"].selections?.all.lineIds).toEqual(selection.lineIds);
+        const head = git(["rev-parse", "HEAD"]);
+        await host.handle({
+            type: "commitChangelist",
+            repositoryRoot: root,
+            revision: store.get(root).revision,
+            listId: "all",
+            paths: ["file.txt"],
+            message: "must not include remainder",
+        });
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(await readFile(path.join(root, "file.txt"), "utf8")).toBe(working);
         expect(delivered).toHaveBeenCalledTimes(1);
     });
 });

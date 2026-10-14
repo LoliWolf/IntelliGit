@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { FrameLocator, Page } from "@playwright/test";
 import { expect, test } from "./fixtureWorkspace";
@@ -223,6 +224,137 @@ test.describe("Selected changes and changelists", () => {
                 "user staged\n",
             );
             expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
+        } finally {
+            await app.close();
+        }
+    });
+
+    test("unstages indexed lines without losing a working-tree sidebar selection", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        await createFiles(workspace.root, workspace.env);
+        await runGit(workspace.root, ["add", "--", FILE], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const view = new IntelliGitView(page);
+            const sidebar = await view.reveal();
+            await expect(
+                sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
+            ).toBeVisible();
+            await chooseFile(sidebar);
+            await sidebar.getByRole("button", { name: "Partial changes", exact: true }).click();
+            const editor = await view.revealPartialChanges(FILE);
+            await editor.getByRole("checkbox", { name: "Select block 1", exact: true }).uncheck();
+            await editor
+                .getByRole("button", { name: "Use selection for commit", exact: true })
+                .click();
+            await expect(
+                editor.getByRole("button", { name: "Use selection for commit", exact: true }),
+            ).toBeEnabled();
+            await editor
+                .getByRole("combobox", { name: "Change source", exact: true })
+                .selectOption("index");
+            await expect(
+                editor.getByRole("button", { name: "Unstage selected", exact: true }),
+            ).toBeEnabled();
+            await editor.getByRole("button", { name: "Unstage selected", exact: true }).click();
+            await expect
+                .poll(() => runGit(workspace.root, ["show", `:${FILE}`], workspace.env))
+                .toBe(base.replace("second = 2", "second = 4"));
+            await sidebar
+                .locator("#commit-area-message")
+                .fill("Working inclusion survives unstage");
+            await expect(sidebar.getByTestId("commit-action-commit")).toBeEnabled();
+            await sidebar.getByTestId("commit-action-commit").click();
+            await expect
+                .poll(() => runGit(workspace.root, ["show", `HEAD:${FILE}`], workspace.env))
+                .toBe(base.replace("first = 1", "first = 3"));
+            expect(await runGit(workspace.root, ["show", `:${OTHER}`], workspace.env)).toBe(
+                "user staged\n",
+            );
+            expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
+        } finally {
+            await app.close();
+        }
+    });
+
+    test("reviews and explicitly dismisses quarantined recovery without changing Git content", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        await createFiles(workspace.root, workspace.env);
+        const script = `
+            import { execFileSync } from "node:child_process";
+            import { GitExecutor } from "./src/git/executor.ts";
+            import { PartialChanges } from "./src/git/partialChanges.ts";
+            import { changeIds } from "./src/changes/selection.ts";
+            const root = ${JSON.stringify(workspace.root)};
+            const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+            const partial = new PartialChanges(new GitExecutor(root), root);
+            const view = await partial.open(${JSON.stringify(FILE)});
+            try {
+                await partial.commit([{snapshotId:view.snapshotId,lineIds:changeIds(view.blocks.slice(0,1))}], "Interrupted selected commit", () => undefined, {
+                    afterPublish: async () => {
+                        const head = git(["rev-parse","HEAD"]);
+                        const tree = git(["rev-parse","HEAD^{tree}"]);
+                        const advanced = git(["commit-tree",tree,"-p",head,"-m","External ref movement"]);
+                        git(["update-ref","HEAD",advanced,head]);
+                    }
+                });
+                throw new Error("Publication must require recovery");
+            } catch (error) {
+                if (!error.message.includes("commit succeeded")) throw error;
+            }
+        `;
+        execFileSync("bun", ["-e", script], {
+            cwd: REPO_ROOT,
+            env: workspace.env,
+            encoding: "utf8",
+        });
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const entries = await runGit(workspace.root, ["ls-files", "--stage", "-z"], workspace.env);
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const sidebar = await new IntelliGitView(page).reveal();
+            const review = sidebar.getByRole("button", {
+                name: "Review partial-index recovery",
+                exact: true,
+            });
+            await expect(review).toBeVisible();
+            const directory = path.join(workspace.root, ".git/intelligit/partial-index-quarantine");
+            const [id] = await readdir(directory);
+            await review.click();
+            await page.locator(".quick-input-widget").getByText(id, { exact: true }).click();
+            await page
+                .getByRole("button", { name: "Discard recovery record", exact: true })
+                .click();
+            await expect(review).toHaveCount(0);
+            expect(await readdir(directory)).toEqual([]);
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect(await runGit(workspace.root, ["ls-files", "--stage", "-z"], workspace.env)).toBe(
+                entries,
+            );
+            expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
+            await runGit(workspace.root, ["add", "--", OTHER], workspace.env);
         } finally {
             await app.close();
         }

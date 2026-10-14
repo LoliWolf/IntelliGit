@@ -13,8 +13,10 @@ import {
 } from "./partialSnapshot";
 import {
     preparePartialCommit,
+    discardPartialRecovery,
     publishPartialIndex,
     recoverPartialIndexes,
+    type PartialRecoveryIssue,
     type PartialTransactionFaults,
 } from "./partialIndexTransaction";
 
@@ -26,6 +28,7 @@ const MAX_COMMIT_BYTES = 16 * 1024 * 1024;
 export class PartialChanges {
     private readonly snapshots = new Map<string, PartialFileSnapshot>();
     private bytes = 0;
+    private issues: PartialRecoveryIssue[] = [];
 
     /** The executor is derived for this captured worktree and shares activation's mutation gate. */
     constructor(
@@ -197,20 +200,40 @@ export class PartialChanges {
     }
 
     /** Pending reconciliation is replayed only under the same repository mutation gate. */
-    async recover(): Promise<boolean> {
+    async recover(faults: PartialTransactionFaults = {}): Promise<boolean> {
         return this.executor.runWithinMutationGate(async () => {
-            const root = await realpath(this.root);
-            const actual = await realpath(
-                (await this.executor.run(["rev-parse", "--show-toplevel"])).trim(),
-            );
-            if (actual !== root) throw new Error("The repository changed.");
-            const gitDir = await realpath(
-                (await this.executor.run(["rev-parse", "--absolute-git-dir"])).trim(),
-            );
-            const recovered = await recoverPartialIndexes(this.executor, root, gitDir);
-            if (recovered) this.clear();
-            return recovered;
+            const { root, gitDir } = await this.recoveryLocation();
+            const result = await recoverPartialIndexes(this.executor, root, gitDir, faults);
+            this.issues = result.issues;
+            if (result.changed) this.clear();
+            return result.changed;
         });
+    }
+
+    /** Native review UI receives identities and reasons, never prepared index bytes. */
+    recoveryIssues(): readonly PartialRecoveryIssue[] {
+        return structuredClone(this.issues);
+    }
+
+    /** Dismisses only an explicitly chosen quarantined record for this captured worktree. */
+    async discardRecovery(id: string): Promise<void> {
+        await this.executor.runWithinMutationGate(async () => {
+            const { root, gitDir } = await this.recoveryLocation();
+            await discardPartialRecovery(root, gitDir, id);
+            this.issues = this.issues.filter((issue) => issue.id !== id);
+        });
+    }
+
+    private async recoveryLocation(): Promise<{ root: string; gitDir: string }> {
+        const root = await realpath(this.root);
+        const actual = await realpath(
+            (await this.executor.run(["rev-parse", "--show-toplevel"])).trim(),
+        );
+        if (actual !== root) throw new Error("The repository changed.");
+        const gitDir = await realpath(
+            (await this.executor.run(["rev-parse", "--absolute-git-dir"])).trim(),
+        );
+        return { root, gitDir };
     }
 
     private clear(): void {

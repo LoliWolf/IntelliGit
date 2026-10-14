@@ -52,6 +52,33 @@ beforeEach(() => {
 });
 
 describe("selected change editor protocol", () => {
+    it("does not apply working inclusion to a different index snapshot", () => {
+        const mounted = mount(<PartialChangesApp />);
+        try {
+            receive({
+                ...data,
+                file: { ...data.file, side: "index" },
+                lists: {
+                    ...data.lists,
+                    changes: {
+                        "test.txt": {
+                            contentId: "working",
+                            lines: {},
+                            selections: { all: { contentId: "working", lineIds: [], total: 2 } },
+                        },
+                    },
+                },
+            });
+            expect(
+                mounted.container.querySelector<HTMLInputElement>(
+                    'input[aria-label="Include line 0:1"]',
+                )!.checked,
+            ).toBe(true);
+            expect(mounted.container.textContent).not.toContain("Partial selection needs review");
+        } finally {
+            unmount(mounted.root, mounted.container);
+        }
+    });
     it("shows a read-only full-document preview and submits IDs rather than a browser patch", () => {
         const mounted = mount(<PartialChangesApp />);
         try {

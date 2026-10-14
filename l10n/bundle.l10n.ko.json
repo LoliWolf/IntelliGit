@@ -871,5 +871,9 @@
     "Selected changes: {path}": "선택한 변경: {path}",
     "Save the native editor before selecting partial changes.": "부분 변경을 선택하기 전에 기본 편집기를 저장하세요.",
     "Selected changes failed: {message}": "선택한 변경 실패: {message}",
-    "Changelist action failed: {message}": "변경 목록 작업 실패: {message}"
+    "Changelist action failed: {message}": "변경 목록 작업 실패: {message}",
+    "Review partial-index recovery": "부분 인덱스 복구 검토",
+    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "격리된 복구 기록을 삭제할까요? Git 기록, 인덱스, 작업 트리 및 잠금은 변경되지 않습니다.",
+    "Discard recovery record": "복구 기록 삭제",
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "선택한 커밋은 완료되었지만 선택 메타데이터를 검토해야 합니다. 커밋을 다시 실행하지 마세요."
 }

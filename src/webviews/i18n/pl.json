@@ -495,5 +495,6 @@
     "changes.noChanges": "Brak zmian",
     "changes.useSelection": "Użyj wyboru do commitu",
     "changes.wholeFile": "Wybierz cały plik",
-    "changes.reviewSelection": "Częściowy wybór wymaga przeglądu"
+    "changes.reviewSelection": "Częściowy wybór wymaga przeglądu",
+    "changes.reviewRecovery": "Sprawdź odzyskiwanie częściowego indeksu"
 }

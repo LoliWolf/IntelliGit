@@ -871,5 +871,9 @@
     "Selected changes: {path}": "Cambios seleccionados: {path}",
     "Save the native editor before selecting partial changes.": "Guarde el editor nativo antes de seleccionar cambios parciales.",
     "Selected changes failed: {message}": "Error en los cambios seleccionados: {message}",
-    "Changelist action failed: {message}": "Error en la acción de lista de cambios: {message}"
+    "Changelist action failed: {message}": "Error en la acción de lista de cambios: {message}",
+    "Review partial-index recovery": "Revisar recuperación del índice parcial",
+    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "¿Descartar este registro de recuperación en cuarentena? El historial de Git, el índice, el árbol de trabajo y los bloqueos no cambiarán.",
+    "Discard recovery record": "Descartar registro de recuperación",
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "El commit seleccionado se completó, pero sus metadatos de selección requieren revisión. No repita el commit."
 }

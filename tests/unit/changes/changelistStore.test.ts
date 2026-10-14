@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import { ChangelistStore } from "../../../src/changes/changelistStore";
 
 describe("worktree changelist metadata", () => {
+    it("persists both named and All inclusion only under an owned commit lease", async () => {
+        const store = new ChangelistStore();
+        let state = await store.create("/one", 0, "Feature");
+        const id = state.lists[1].id;
+        const inclusion = [{ path: "one.txt", contentId: "snapshot", lineIds: ["0:1"], total: 2 }];
+        await expect(
+            store.prepareCommitInclusion("/one", state.revision, id, inclusion),
+        ).rejects.toThrow("lease");
+        const release = await store.beginCommit("/one");
+        try {
+            state = await store.prepareCommitInclusion("/one", state.revision, id, inclusion);
+            expect(state.changes["one.txt"].selections?.all).toEqual(
+                state.changes["one.txt"].selections?.[id],
+            );
+            expect(state.changes["one.txt"].selections?.all.lineIds).toEqual(["0:1"]);
+        } finally {
+            release();
+        }
+    });
     it("persists lists and active membership without invoking Git", async () => {
         const values = new Map<string, unknown>();
         const storage = {

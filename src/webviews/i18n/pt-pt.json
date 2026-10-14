@@ -485,5 +485,6 @@
     "changes.noChanges": "Sem alterações",
     "changes.useSelection": "Usar seleção no commit",
     "changes.wholeFile": "Selecionar ficheiro inteiro",
-    "changes.reviewSelection": "A seleção parcial precisa de revisão"
+    "changes.reviewSelection": "A seleção parcial precisa de revisão",
+    "changes.reviewRecovery": "Rever recuperação do índice parcial"
 }

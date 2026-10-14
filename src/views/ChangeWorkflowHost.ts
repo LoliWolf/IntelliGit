@@ -12,6 +12,7 @@ import { assertRepoPathArray, assertString } from "./messageValidation";
 import { commitSelectedFromPanel, runGitOperationFromPanel } from "./commitPanelActions";
 import { showDiffFromPanel } from "./panelFileActions";
 import { getErrorMessage } from "../utils/errors";
+import { showTimedWarningMessage } from "../utils/notifications";
 
 interface ChangeWorkflowDeps {
     root: string;
@@ -57,6 +58,7 @@ export class ChangeWorkflowHost {
                     repositoryRoot: root,
                     state,
                     busy: this.committing || this.store.isCommitting(root),
+                    ...(this.partial.recoveryIssues().length ? { hasRecoveryIssues: true } : {}),
                 });
         });
     }
@@ -123,6 +125,7 @@ export class ChangeWorkflowHost {
                 repositoryRoot: this.deps.root,
                 state: this.store.get(this.deps.root),
                 busy: this.committing || this.store.isCommitting(this.deps.root),
+                ...(this.partial.recoveryIssues().length ? { hasRecoveryIssues: true } : {}),
             });
         } catch (error) {
             this.deps.post({
@@ -160,6 +163,9 @@ export class ChangeWorkflowHost {
                 ? ""
                 : assertString(message.listId, "listId");
         switch (message.action) {
+            case "reviewRecovery":
+                await this.reviewRecovery();
+                break;
             case "create":
             case "rename": {
                 const name = await vscode.window.showInputBox({
@@ -237,6 +243,33 @@ export class ChangeWorkflowHost {
         }
     }
 
+    /** Reviews captured-worktree records; dismissal cannot restore or mutate Git history/index. */
+    private async reviewRecovery(): Promise<void> {
+        await this.partial.recover();
+        const chosen = await vscode.window.showQuickPick(
+            this.partial.recoveryIssues().map((issue) => ({
+                label: issue.id,
+                description: issue.reason,
+                detail: issue.commit,
+                issue,
+            })),
+            { title: vscode.l10n.t("Review partial-index recovery") },
+        );
+        if (!chosen) return;
+        if (chosen.issue.kind !== "quarantined") {
+            showTimedWarningMessage(chosen.issue.reason);
+            return;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+            vscode.l10n.t(
+                "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.",
+            ),
+            { modal: true },
+            vscode.l10n.t("Discard recovery record"),
+        );
+        if (confirm) await this.partial.discardRecovery(chosen.issue.id);
+    }
+
     private open(file: string, requestedList: string | undefined): void {
         const listId = requestedList ?? "all";
         new PartialChangesPanel(this.deps.extensionUri, file, {
@@ -268,18 +301,6 @@ export class ChangeWorkflowHost {
                 await this.partial.stage(selection, (files) =>
                     assertChangeBuffersSaved(this.deps.root, files),
                 );
-                if (snapshot.view.side === "index") {
-                    const metadata = this.store.get(this.deps.root).changes[file];
-                    if (metadata)
-                        await this.store.recordSelection(
-                            this.deps.root,
-                            file,
-                            metadata.contentId,
-                            listId,
-                            [],
-                            metadata.totalChanges ?? 0,
-                        );
-                }
                 await this.deps.actions.refreshData();
                 this.deps.actions.fireWorkingTreeChanged();
             },
@@ -307,6 +328,19 @@ export class ChangeWorkflowHost {
                 );
                 let commit = "";
                 await this.runCommit(async () => {
+                    await this.store.prepareCommitInclusion(
+                        this.deps.root,
+                        this.store.get(this.deps.root).revision,
+                        listId,
+                        [
+                            {
+                                path: file,
+                                contentId: original.contentId,
+                                lineIds: selection.lineIds,
+                                total: changeIds(original.view.blocks).length,
+                            },
+                        ],
+                    );
                     commit = await this.partial.commit(
                         [selection],
                         assertString(message, "message"),
@@ -395,6 +429,12 @@ export class ChangeWorkflowHost {
         if (message.amend)
             throw new Error("Partial amend requires the whole-file commit workflow.");
         const selections: SelectedFileChanges[] = [];
+        const inclusions: {
+            path: string;
+            contentId: string;
+            lineIds: string[];
+            total: number;
+        }[] = [];
         const consumed: { path: string; fingerprints: ReadonlySet<string> }[] = [];
         for (const file of paths) {
             const view = await this.partial.open(file);
@@ -421,6 +461,12 @@ export class ChangeWorkflowHost {
                 );
             if (!lines.length) throw new Error("No selected changes belong to this changelist.");
             selections.push({ snapshotId: view.snapshotId, lineIds: lines.map((line) => line.id) });
+            inclusions.push({
+                path: file,
+                contentId: snapshot.contentId,
+                lineIds: lines.map((line) => line.id),
+                total: changeIds(view.blocks).length,
+            });
             consumed.push({
                 path: file,
                 fingerprints: new Set(lines.map((line) => line.fingerprint)),
@@ -428,11 +474,17 @@ export class ChangeWorkflowHost {
         }
         if (this.store.get(this.deps.root).revision !== state.revision)
             throw new Error("Changelists changed during commit preparation.");
+        const prepared = await this.store.prepareCommitInclusion(
+            this.deps.root,
+            state.revision,
+            id,
+            inclusions,
+        );
         await this.partial.commit(
             selections,
             assertString(message.message, "message"),
             async (files) => {
-                if (this.store.get(this.deps.root).revision !== state.revision) {
+                if (this.store.get(this.deps.root).revision !== prepared.revision) {
                     throw new Error("Changelists changed during commit preparation.");
                 }
                 await assertChangeBuffersSaved(this.deps.root, files);
@@ -472,6 +524,18 @@ export class ChangeWorkflowHost {
                 "[IntelliGit] Selected commit inclusion needs review after completion:",
                 error,
             );
+            try {
+                const message = vscode.l10n.t(
+                    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.",
+                );
+                showTimedWarningMessage(message);
+                this.deps.post({ type: "error", repositoryRoot: this.deps.root, message });
+            } catch (deliveryError) {
+                console.error(
+                    "[IntelliGit] Selected commit review warning could not be delivered:",
+                    deliveryError,
+                );
+            }
         }
     }
 

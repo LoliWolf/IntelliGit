@@ -302,6 +302,8 @@ async function computeBlocks(executor: GitExecutor, base: string, target: string
         await writeFile(after, target, { mode: 0o600 });
         const result = await executor.runBinary(
             [
+                "-c",
+                "diff.suppressBlankEmpty=false",
                 "diff",
                 "--no-index",
                 "--no-ext-diff",

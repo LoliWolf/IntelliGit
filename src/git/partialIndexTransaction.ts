@@ -24,12 +24,24 @@ interface IndexJournal {
     newHead?: string;
     pid: number;
     lock?: { ino: string; dev: string };
+    refusal?: string;
 }
+
+/** Refused transactions retain evidence, while live owners are never discarded. */
+export interface PartialRecoveryIssue {
+    id: string;
+    kind: "active" | "blocked" | "quarantined";
+    reason: string;
+    commit?: string;
+}
+
+class RecoveryRefusal extends Error {}
 
 /** Test seams fire at durable boundaries, never through the webview protocol. */
 export interface PartialTransactionFaults {
     afterLock?: () => Promise<void>;
     afterPublish?: () => Promise<void>;
+    beforeRecoveryPublish?: () => Promise<void>;
 }
 
 /** Publishes a prepared index atomically, with a recoverable CAS ref update for commits. */
@@ -273,43 +285,85 @@ export async function recoverPartialIndexes(
     executor: GitExecutor,
     root: string,
     gitDir: string,
-): Promise<boolean> {
+    faults: PartialTransactionFaults = {},
+): Promise<{ changed: boolean; issues: PartialRecoveryIssue[] }> {
     const parent = path.join(gitDir, "intelligit", "partial-index");
-    let names: string[];
-    try {
-        names = await readdir(parent);
-    } catch (error) {
-        if (isMissing(error)) return false;
-        throw error;
-    }
-    if (names.length > 32) throw new Error("Too many pending partial-index transactions.");
+    const names = await recoveryNames(parent);
+    const issues: PartialRecoveryIssue[] = [];
     let changed = false;
     for (const name of names) {
-        if (!/^[a-f0-9-]{36}$/.test(name))
-            throw new Error("Unexpected partial-index recovery entry.");
         const directory = path.join(parent, name);
         await assertContainedParent(gitDir, path.join(directory, "journal.json"));
         const record = await readJournal(directory, root, gitDir);
         if (record.pid !== process.pid && isAlive(record.pid)) {
-            throw new Error("Another process owns this partial-index recovery.");
+            issues.push({
+                id: name,
+                kind: "active",
+                reason: `Another process may own this partial-index recovery (PID ${record.pid}).`,
+                commit: record.newHead,
+            });
+            continue;
         }
-        changed = (await recoverOne(executor, directory, record)) || changed;
+        try {
+            changed = (await recoverOne(executor, directory, record, faults)) || changed;
+        } catch (error) {
+            if (!(error instanceof RecoveryRefusal)) throw error;
+            if (!(await quarantineRecovery(directory, record, error.message))) {
+                issues.push({
+                    id: name,
+                    kind: "blocked",
+                    reason: "Review quarantined partial-index records before recovering more.",
+                    commit: record.newHead,
+                });
+            }
+        }
     }
-    return changed;
+    const quarantine = path.join(gitDir, "intelligit", "partial-index-quarantine");
+    for (const id of await recoveryNames(quarantine)) {
+        const directory = path.join(quarantine, id);
+        await assertContainedParent(gitDir, path.join(directory, "journal.json"));
+        const record = await readJournal(directory, root, gitDir);
+        issues.push({
+            id,
+            kind: "quarantined",
+            reason: record.refusal ?? "Partial-index recovery needs review.",
+            commit: record.newHead,
+        });
+    }
+    return { changed, issues };
+}
+
+/** Explicit dismissal removes only quarantined extension metadata, never Git state or locks. */
+export async function discardPartialRecovery(
+    root: string,
+    gitDir: string,
+    id: string,
+): Promise<void> {
+    if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid recovery record.");
+    const parent = path.join(gitDir, "intelligit", "partial-index-quarantine");
+    if (!(await recoveryNames(parent)).includes(id))
+        throw new Error("The recovery record changed.");
+    const directory = path.join(parent, id);
+    await assertContainedParent(gitDir, path.join(directory, "journal.json"));
+    await readJournal(directory, root, gitDir);
+    await rm(directory, { recursive: true });
+    await syncDirectory(parent);
 }
 
 async function recoverOne(
     executor: GitExecutor,
     directory: string,
     journal: IndexJournal,
+    faults: PartialTransactionFaults,
 ): Promise<boolean> {
     await assertPartialOperationIdle(journal.gitDir);
     const head = (await executor.run(["rev-parse", "--verify", "HEAD"])).trim();
     const ref = await readPartialRef(executor);
     const currentHash = changeFingerprint(await readPartialIndex(journal));
     if (ref !== journal.ref)
-        throw new Error("The branch changed; partial-index recovery requires review.");
+        throw new RecoveryRefusal("The branch changed; partial-index recovery requires review.");
     if (head === (journal.newHead ?? journal.oldHead) && currentHash === journal.preparedHash) {
+        await removePreparedIndexLock(`${journal.indexPath}.lock`, journal);
         await syncDirectory(journal.gitDir);
         await rm(directory, { recursive: true, force: true });
         return false;
@@ -320,11 +374,16 @@ async function recoverOne(
         return false;
     }
     if (!journal.newHead || head !== journal.newHead || currentHash !== journal.indexHash) {
-        throw new Error("The index or HEAD changed; partial-index recovery will not overwrite it.");
+        throw new RecoveryRefusal(
+            "The index or HEAD changed; partial-index recovery will not overwrite it.",
+        );
     }
-    const bytes = await readFile(path.join(directory, "index"));
+    const bytes = await readPartialIndex({
+        gitDir: directory,
+        indexPath: path.join(directory, "index"),
+    });
     if (changeFingerprint(bytes) !== journal.preparedHash)
-        throw new Error("The recovery index is corrupt.");
+        throw new RecoveryRefusal("The recovery index is corrupt.");
     const lockPath = `${journal.indexPath}.lock`;
     let lock: FileHandle | undefined;
     try {
@@ -336,8 +395,8 @@ async function recoverOne(
             await lock.writeFile(bytes);
             await lock.sync();
         } catch (error) {
-            if (!isExists(error) || !(await ownsIndexLock(lockPath, journal))) throw error;
-            if (changeFingerprint(await readFile(lockPath)) !== journal.preparedHash) throw error;
+            if (!isExists(error)) throw error;
+            await assertRecoveryLock(lockPath, journal);
         }
         await lock?.close();
         lock = undefined;
@@ -346,8 +405,10 @@ async function recoverOne(
             (await readPartialRef(executor)) !== ref ||
             changeFingerprint(await readPartialIndex(journal)) !== currentHash
         ) {
-            throw new Error("The repository changed during partial-index recovery.");
+            throw new RecoveryRefusal("The repository changed during partial-index recovery.");
         }
+        await faults.beforeRecoveryPublish?.();
+        await assertRecoveryLock(lockPath, journal);
         await rename(lockPath, journal.indexPath);
         await syncDirectory(journal.gitDir);
         await rm(directory, { recursive: true, force: true });
@@ -357,9 +418,66 @@ async function recoverOne(
     }
 }
 
-async function createTransactionDirectory(gitDir: string): Promise<string> {
+async function recoveryNames(parent: string): Promise<string[]> {
+    try {
+        const namespace = await lstat(path.dirname(parent));
+        if (!namespace.isDirectory() || namespace.isSymbolicLink())
+            throw new Error("Partial-index recovery requires a regular namespace.");
+        const stats = await lstat(parent);
+        if (!stats.isDirectory() || stats.isSymbolicLink())
+            throw new Error("Partial-index recovery requires a regular directory.");
+        const names = await readdir(parent);
+        if (names.length > 32) throw new Error("Too many partial-index recovery records.");
+        if (names.some((name) => !/^[a-f0-9-]{36}$/.test(name)))
+            throw new Error("Unexpected partial-index recovery entry.");
+        return names.sort();
+    } catch (error) {
+        if (isMissing(error)) return [];
+        throw error;
+    }
+}
+
+async function quarantineRecovery(
+    directory: string,
+    journal: IndexJournal,
+    reason: string,
+): Promise<boolean> {
+    const parent = await createRecoveryParent(journal.gitDir, "partial-index-quarantine");
+    journal.refusal = reason;
+    await writeJournal(directory, journal);
+    await removePreparedIndexLock(`${journal.indexPath}.lock`, journal);
+    if ((await recoveryNames(parent)).length >= 32) return false;
+    await rename(directory, path.join(parent, randomUUID()));
+    await syncDirectory(path.dirname(directory));
+    await syncDirectory(parent);
+    return true;
+}
+
+async function removePreparedIndexLock(lock: string, journal: IndexJournal): Promise<void> {
+    if (!(await ownsIndexLock(lock, journal))) return;
+    const stats = await lstat(lock);
+    if (stats.size > 64 * 1024 * 1024) return;
+    const bytes = await readFile(lock);
+    if (changeFingerprint(bytes) === journal.preparedHash && (await ownsIndexLock(lock, journal))) {
+        await rm(lock);
+        await syncDirectory(journal.gitDir);
+    }
+}
+
+async function assertRecoveryLock(lock: string, journal: IndexJournal): Promise<void> {
+    try {
+        await assertPreparedLock(lock, journal);
+    } catch (error) {
+        throw new RecoveryRefusal(
+            "Index-lock ownership or content changed during recovery. The foreign lock is retained.",
+            { cause: error },
+        );
+    }
+}
+
+async function createRecoveryParent(gitDir: string, kind: string): Promise<string> {
     let parent = gitDir;
-    for (const name of ["intelligit", "partial-index"]) {
+    for (const name of ["intelligit", kind]) {
         const next = path.join(parent, name);
         await assertContainedParent(gitDir, next);
         try {
@@ -374,6 +492,17 @@ async function createTransactionDirectory(gitDir: string): Promise<string> {
         parent = next;
         await syncDirectory(path.dirname(next));
     }
+    return parent;
+}
+
+async function createTransactionDirectory(gitDir: string): Promise<string> {
+    if (
+        (await recoveryNames(path.join(gitDir, "intelligit", "partial-index-quarantine"))).length >=
+        32
+    ) {
+        throw new Error("Review quarantined partial-index records before committing more.");
+    }
+    const parent = await createRecoveryParent(gitDir, "partial-index");
     const directory = path.join(parent, randomUUID());
     await assertContainedParent(gitDir, directory);
     await mkdir(directory, { mode: 0o700 });
@@ -399,6 +528,9 @@ async function durableFile(file: string, bytes: Buffer): Promise<void> {
 }
 
 async function readJournal(directory: string, root: string, gitDir: string): Promise<IndexJournal> {
+    const directoryStats = await lstat(directory);
+    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink())
+        throw new Error("Invalid partial-index journal directory.");
     const file = path.join(directory, "journal.json");
     const stats = await lstat(file);
     if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 16_384) {
@@ -416,7 +548,9 @@ async function readJournal(directory: string, root: string, gitDir: string): Pro
         !/^[a-f0-9]{64}$/.test(journal.preparedHash) ||
         !Number.isSafeInteger(journal.pid) ||
         journal.pid <= 0 ||
-        (journal.newHead !== undefined && !/^[a-f0-9]{40,64}$/.test(journal.newHead))
+        (journal.newHead !== undefined && !/^[a-f0-9]{40,64}$/.test(journal.newHead)) ||
+        (journal.refusal !== undefined &&
+            (typeof journal.refusal !== "string" || journal.refusal.length > 1024))
     ) {
         throw new Error("Invalid partial-index recovery identity.");
     }
@@ -446,6 +580,7 @@ async function removeOwnedIndexLock(file: string, journal: IndexJournal): Promis
 async function assertPreparedLock(file: string, journal: IndexJournal): Promise<void> {
     if (
         !(await ownsIndexLock(file, journal)) ||
+        (await lstat(file)).size > 64 * 1024 * 1024 ||
         changeFingerprint(await readFile(file)) !== journal.preparedHash
     ) {
         throw new Error("Index-lock ownership changed. The foreign lock will not be overwritten.");

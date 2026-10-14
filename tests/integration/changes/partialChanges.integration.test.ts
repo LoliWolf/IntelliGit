@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile, chmod, symlink } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+    mkdtemp,
+    readFile,
+    readdir,
+    rm,
+    writeFile,
+    chmod,
+    symlink,
+    copyFile,
+    mkdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { GitExecutor } from "../../../src/git/executor";
@@ -246,12 +257,236 @@ describe("partial changes on real Git", () => {
         ).rejects.toThrow("commit succeeded");
         const advanced = git(["rev-parse", "HEAD"]);
         expect(await readdir(path.join(root, ".git/intelligit/partial-index"))).toHaveLength(1);
-        await expect(workflow.recover()).rejects.toThrow("will not overwrite");
+        expect(await workflow.recover()).toBe(false);
+        expect(workflow.recoveryIssues()).toEqual([
+            expect.objectContaining({
+                kind: "quarantined",
+                reason: expect.stringContaining("will not overwrite"),
+            }),
+        ]);
+        await expect(readFile(path.join(root, ".git/index.lock"))).rejects.toMatchObject({
+            code: "ENOENT",
+        });
+        expect(await readdir(path.join(root, ".git/intelligit/partial-index"))).toEqual([]);
         expect(git(["rev-parse", "HEAD"])).toBe(advanced);
         expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
         expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
+        await workflow.open("text.txt");
+        git(["add", "--", "other.txt"]);
+        const beforeDiscard = await readFile(path.join(root, ".git/index"));
+        await workflow.discardRecovery(workflow.recoveryIssues()[0].id);
+        expect(workflow.recoveryIssues()).toEqual([]);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(beforeDiscard);
+        expect(git(["rev-parse", "HEAD"])).toBe(advanced);
     });
 
+    it.each(["replace", "modify"] as const)(
+        "does not publish or delete a foreign lock during recovery (%s)",
+        async (kind) => {
+            const view = await workflow.open("text.txt");
+            await expect(
+                workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                    afterPublish: async () => {
+                        throw new Error("crash");
+                    },
+                }),
+            ).rejects.toThrow("commit succeeded");
+            const head = git(["rev-parse", "HEAD"]);
+            const index = await readFile(path.join(root, ".git/index"));
+            const lock = path.join(root, ".git/index.lock");
+            expect(
+                await workflow.recover({
+                    beforeRecoveryPublish: async () => {
+                        if (kind === "replace") await rm(lock);
+                        await writeFile(lock, "foreign recovery lock");
+                    },
+                }),
+            ).toBe(false);
+            expect(workflow.recoveryIssues()[0].reason).toContain("foreign lock");
+            expect(await readFile(lock, "utf8")).toBe("foreign recovery lock");
+            await workflow.discardRecovery(workflow.recoveryIssues()[0].id);
+            expect(await readFile(lock, "utf8")).toBe("foreign recovery lock");
+            expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+            expect(git(["rev-parse", "HEAD"])).toBe(head);
+        },
+    );
+
+    it("quarantines a refused record without blocking a later valid reconciliation", async () => {
+        const view = await workflow.open("text.txt");
+        await expect(
+            workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                afterPublish: async () => {
+                    throw new Error("crash");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        const parent = path.join(root, ".git/intelligit/partial-index");
+        const [id] = await readdir(parent);
+        const record = JSON.parse(
+            await readFile(path.join(parent, id, "journal.json"), "utf8"),
+        ) as Record<string, unknown>;
+        const refused = path.join(parent, "00000000-0000-0000-0000-000000000001");
+        await mkdir(refused);
+        await writeFile(
+            path.join(refused, "journal.json"),
+            JSON.stringify({ ...record, newHead: "a".repeat(40) }),
+        );
+        await copyFile(path.join(parent, id, "index"), path.join(refused, "index"));
+        const head = git(["rev-parse", "HEAD"]);
+        expect(await workflow.recover()).toBe(true);
+        expect(git(["show", ":text.txt"])).toBe(selected);
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(workflow.recoveryIssues()).toHaveLength(1);
+    });
+
+    it("quarantines recovery after a branch change without overwriting the index", async () => {
+        const view = await workflow.open("text.txt");
+        await expect(
+            workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                afterPublish: async () => {
+                    throw new Error("crash");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        const head = git(["rev-parse", "HEAD"]);
+        const index = await readFile(path.join(root, ".git/index"));
+        git(["branch", "new-context"]);
+        git(["symbolic-ref", "HEAD", "refs/heads/new-context"]);
+        expect(await workflow.recover()).toBe(false);
+        expect(workflow.recoveryIssues()[0].reason).toContain("branch changed");
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        git(["add", "--", "other.txt"]);
+    });
+
+    it("does not overwrite an externally staged index when recovery is refused", async () => {
+        const view = await workflow.open("text.txt");
+        await expect(
+            workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                afterPublish: async () => {
+                    throw new Error("crash");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        await writeFile(path.join(root, "other.txt"), "external staging\n");
+        const alternate = path.join(root, ".git/external-index");
+        await copyFile(path.join(root, ".git/index"), alternate);
+        execFileSync("git", ["add", "--", "other.txt"], {
+            cwd: root,
+            env: { ...process.env, GIT_INDEX_FILE: alternate },
+        });
+        const foreign = await readFile(alternate);
+        await writeFile(path.join(root, ".git/index"), foreign);
+        const head = git(["rev-parse", "HEAD"]);
+        expect(await workflow.recover()).toBe(false);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(foreign);
+        expect(git(["show", ":other.txt"])).toBe("external staging\n");
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        await expect(readFile(path.join(root, ".git/index.lock"))).rejects.toMatchObject({
+            code: "ENOENT",
+        });
+    });
+
+    it("reports a live foreign owner without removing its lock or blocking snapshot reads", async () => {
+        const view = await workflow.open("text.txt");
+        await expect(
+            workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                afterPublish: async () => {
+                    throw new Error("crash");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        const owner = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+            stdio: "ignore",
+        });
+        try {
+            if (!owner.pid) throw new Error("Missing owner process");
+            const parent = path.join(root, ".git/intelligit/partial-index");
+            const [id] = await readdir(parent);
+            const file = path.join(parent, id, "journal.json");
+            const record = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+            await writeFile(file, JSON.stringify({ ...record, pid: owner.pid }));
+            const lock = await readFile(path.join(root, ".git/index.lock"));
+            expect(await workflow.recover()).toBe(false);
+            expect(workflow.recoveryIssues()).toEqual([
+                expect.objectContaining({ kind: "active" }),
+            ]);
+            await workflow.open("text.txt");
+            expect(await readFile(path.join(root, ".git/index.lock"))).toEqual(lock);
+            await expect(workflow.discardRecovery(id)).rejects.toThrow("changed");
+        } finally {
+            const exited = once(owner, "exit");
+            owner.kill();
+            await exited;
+        }
+        expect(await workflow.recover()).toBe(true);
+    });
+
+    it("keeps review available at the quarantine limit and resumes after explicit dismissal", async () => {
+        const view = await workflow.open("text.txt");
+        await expect(
+            workflow.commit([firstBlock(view)], "interrupted", () => undefined, {
+                afterPublish: async () => {
+                    throw new Error("crash");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        const parent = path.join(root, ".git/intelligit/partial-index");
+        const [id] = await readdir(parent);
+        const bytes = await readFile(path.join(parent, id, "journal.json"), "utf8");
+        const quarantine = path.join(root, ".git/intelligit/partial-index-quarantine");
+        await mkdir(quarantine);
+        for (let n = 0; n < 32; n++) {
+            const kept = path.join(
+                quarantine,
+                `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+            );
+            await mkdir(kept);
+            await writeFile(path.join(kept, "journal.json"), bytes);
+            await copyFile(path.join(parent, id, "index"), path.join(kept, "index"));
+        }
+        const committed = git(["rev-parse", "HEAD"]).trim();
+        const tree = git(["rev-parse", "HEAD^{tree}"]).trim();
+        git([
+            "update-ref",
+            "HEAD",
+            git(["commit-tree", tree, "-p", committed, "-m", "external"]).trim(),
+            committed,
+        ]);
+        const head = git(["rev-parse", "HEAD"]);
+        const index = await readFile(path.join(root, ".git/index"));
+        expect(await workflow.recover()).toBe(false);
+        expect(
+            workflow.recoveryIssues().filter((issue) => issue.kind === "quarantined"),
+        ).toHaveLength(32);
+        expect(workflow.recoveryIssues().some((issue) => issue.kind === "blocked")).toBe(true);
+        await expect(readFile(path.join(root, ".git/index.lock"))).rejects.toMatchObject({
+            code: "ENOENT",
+        });
+        const first = workflow.recoveryIssues().find((issue) => issue.kind === "quarantined")!;
+        await workflow.discardRecovery(first.id);
+        expect(await workflow.recover()).toBe(false);
+        expect(workflow.recoveryIssues().some((issue) => issue.kind === "blocked")).toBe(false);
+        expect(await readdir(parent)).toEqual([]);
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+    });
+    it("pins blank-context formatting despite the user's suppressBlankEmpty configuration", async () => {
+        const content = "one\n\nold\n\nlast\n";
+        const changed = content.replace("old", "changed");
+        await writeFile(path.join(root, "blank.txt"), content);
+        git(["add", "--", "blank.txt"]);
+        git(["commit", "-qm", "blank context"]);
+        await writeFile(path.join(root, "blank.txt"), changed);
+        git(["config", "diff.suppressBlankEmpty", "true"]);
+        const view = await workflow.open("blank.txt");
+        await workflow.stage(
+            { snapshotId: view.snapshotId, lineIds: changeIds(view.blocks) },
+            () => undefined,
+        );
+        expect(git(["show", ":blank.txt"])).toBe(changed);
+        expect(git(["config", "--get", "diff.suppressBlankEmpty"]).trim()).toBe("true");
+    });
     it("rejects a same-commit branch switch without changing Git", async () => {
         const view = await workflow.open("text.txt");
         const head = git(["rev-parse", "HEAD"]);

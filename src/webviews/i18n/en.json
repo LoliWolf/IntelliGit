@@ -475,5 +475,6 @@
     "changes.noChanges": "No changes",
     "changes.useSelection": "Use selection for commit",
     "changes.wholeFile": "Select whole file",
-    "changes.reviewSelection": "Partial selection needs review"
+    "changes.reviewSelection": "Partial selection needs review",
+    "changes.reviewRecovery": "Review partial-index recovery"
 }

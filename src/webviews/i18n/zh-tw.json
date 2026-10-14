@@ -465,5 +465,6 @@
     "changes.noChanges": "沒有變更",
     "changes.useSelection": "將選取內容用於提交",
     "changes.wholeFile": "選取整個檔案",
-    "changes.reviewSelection": "部分選取需要複查"
+    "changes.reviewSelection": "部分選取需要複查",
+    "changes.reviewRecovery": "檢查部分暫存區復原"
 }

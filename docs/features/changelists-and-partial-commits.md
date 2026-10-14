@@ -58,9 +58,24 @@ externally changed refs/indexes. An interrupted published commit reports that it
 already succeeded and needs reconciliation, not another commit. POSIX directory
 fsync is used; Windows has no equivalent directory fsync through this Node API.
 
+Refused recovery records move to `intelligit/partial-index-quarantine`. Only a
+lock with matching inode/device and prepared content is removed; changed/foreign
+locks remain untouched. Recovery validates lock identity and bytes again before
+publication. The Changes toolbar exposes a recovery-review action; confirmed
+dismissal removes only the selected quarantined record, never Git history,
+index, worktree or locks. Live foreign PIDs are reported conservatively and
+are not unlocked or discarded; one such record does not block other recovery
+entries or read-only snapshots.
+
 List writes use shared workspace storage, revision compare-and-swap and root-bound
 commit leases. Stale assignments/selections require explicit review. Corrupt
 metadata is refused, not overwritten.
+
+Selected inclusion is persisted for its scope and the All view before Git
+publication. A persistence failure aborts before committing; failed post-commit
+metadata consumption leaves a durable old-snapshot fence and a success-with-review
+warning, not a whole-file fallback. Index-side unstaging does not alter saved
+working-tree inclusion.
 
 ## Performance and Verification
 

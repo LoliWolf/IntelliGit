@@ -11,6 +11,7 @@ interface ClientState {
     filter: string;
     checked: Record<string, string[]>;
     busy: boolean;
+    hasRecoveryIssues?: boolean;
     error?: string;
 }
 
@@ -107,6 +108,7 @@ export function useChangelists(props: CommitTabProps) {
                                         : "all",
                               checked: previous.root === root ? previous.checked : saved.checked,
                               busy: message.busy === true,
+                              hasRecoveryIssues: message.hasRecoveryIssues === true,
                               error: previous.root === root ? previous.error : undefined,
                           },
                 );
@@ -200,7 +202,16 @@ export function useChangelists(props: CommitTabProps) {
         [filter, props],
     );
     const command = useCallback(
-        (action: "create" | "rename" | "remove" | "activate" | "move" | "resetSelection") => {
+        (
+            action:
+                | "create"
+                | "rename"
+                | "remove"
+                | "activate"
+                | "move"
+                | "resetSelection"
+                | "reviewRecovery",
+        ) => {
             if (!root || !metadata) return;
             setState((previous) => ({ ...previous, busy: true, error: undefined }));
             api.postMessage({
@@ -271,6 +282,7 @@ export function useChangelists(props: CommitTabProps) {
         openPartial,
         commit,
         busy: state.root === root && state.busy,
+        hasRecoveryIssues: state.root === root && state.hasRecoveryIssues === true,
         error: state.root === root ? state.error : undefined,
         toggleFile:
             filter === "all"

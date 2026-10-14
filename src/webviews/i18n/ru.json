@@ -495,5 +495,6 @@
     "changes.noChanges": "Нет изменений",
     "changes.useSelection": "Использовать выбор для коммита",
     "changes.wholeFile": "Выбрать весь файл",
-    "changes.reviewSelection": "Частичный выбор требует проверки"
+    "changes.reviewSelection": "Частичный выбор требует проверки",
+    "changes.reviewRecovery": "Проверить восстановление частичного индекса"
 }

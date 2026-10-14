@@ -7,6 +7,7 @@ import {
     VscArrowRight,
     VscDiff,
     VscClearAll,
+    VscWarning,
 } from "react-icons/vsc";
 import { t } from "../../shared/i18n";
 import type { useChangelists } from "../hooks/useChangelists";
@@ -122,6 +123,18 @@ export function ChangelistToolbar({
                     </option>
                 ))}
             </select>
+            {workflow.hasRecoveryIssues ? (
+                <button
+                    type="button"
+                    style={buttonStyle}
+                    title={t("changes.reviewRecovery")}
+                    aria-label={t("changes.reviewRecovery")}
+                    disabled={disabled || workflow.busy}
+                    onClick={() => workflow.command("reviewRecovery")}
+                >
+                    <VscWarning />
+                </button>
+            ) : null}
             {tools.map((tool) => (
                 <button
                     key={tool.label}

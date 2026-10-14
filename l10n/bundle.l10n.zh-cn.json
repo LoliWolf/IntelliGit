@@ -871,5 +871,9 @@
     "Selected changes: {path}": "所选更改：{path}",
     "Save the native editor before selecting partial changes.": "选择部分更改前请保存原生编辑器。",
     "Selected changes failed: {message}": "所选更改操作失败：{message}",
-    "Changelist action failed: {message}": "更改列表操作失败：{message}"
+    "Changelist action failed: {message}": "更改列表操作失败：{message}",
+    "Review partial-index recovery": "检查部分暂存区恢复",
+    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "丢弃这条隔离的恢复记录？Git 历史、暂存区、工作区和锁均不会改变。",
+    "Discard recovery record": "丢弃恢复记录",
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "所选更改已提交，但选择元数据需要检查。请勿重复提交。"
 }

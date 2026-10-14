@@ -465,5 +465,6 @@
     "changes.noChanges": "변경 없음",
     "changes.useSelection": "선택 항목을 커밋에 사용",
     "changes.wholeFile": "전체 파일 선택",
-    "changes.reviewSelection": "부분 선택 검토 필요"
+    "changes.reviewSelection": "부분 선택 검토 필요",
+    "changes.reviewRecovery": "부분 인덱스 복구 검토"
 }

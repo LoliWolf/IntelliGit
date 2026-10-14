@@ -7,6 +7,13 @@ interface MetadataStorage {
     update(key: string, value: unknown): PromiseLike<void>;
 }
 
+interface CommitInclusion {
+    path: string;
+    contentId: string;
+    lineIds: readonly string[];
+    total: number;
+}
+
 const STORAGE_KEY = "intelligit.changelists.v1";
 /** A stable fallback independent of locale or a user-created list name. */
 export const DEFAULT_CHANGELIST_ID = "default";
@@ -314,7 +321,7 @@ export class ChangelistStore {
         });
     }
 
-    /** Clicking an entire file explicitly removes only the current view's partial inclusion. */
+    /** The explicit whole-file action removes only the current view's partial inclusion. */
     resetSelection(
         root: string,
         revision: number,
@@ -329,6 +336,51 @@ export class ChangelistStore {
                 if (selections) delete selections[scope];
             }
         });
+    }
+
+    /** Persists exclusion fences before Git can publish, including the whole-file All view. */
+    prepareCommitInclusion(
+        root: string,
+        revision: number,
+        scope: string,
+        files: readonly CommitInclusion[],
+    ): Promise<ChangelistState> {
+        if (!files.length || files.length > 64) throw new Error("Invalid selected commit files.");
+        return this.write(
+            root,
+            revision,
+            (state) => {
+                if (!this.commitLeases.has(root))
+                    throw new Error("A selected commit lease is required.");
+                if (scope !== "all") requireList(state, scope);
+                for (const file of files) {
+                    const safe = assertRepoRelativePath(file.path);
+                    if (
+                        !Number.isSafeInteger(file.total) ||
+                        file.total > 100_000 ||
+                        file.lineIds.length === 0 ||
+                        file.lineIds.length > file.total ||
+                        new Set(file.lineIds).size !== file.lineIds.length
+                    ) {
+                        throw new Error("Invalid selected commit inclusion.");
+                    }
+                    const previous = state.changes[safe] ?? {
+                        contentId: file.contentId,
+                        lines: {},
+                    };
+                    const inclusion = {
+                        contentId: file.contentId,
+                        lineIds: [...file.lineIds],
+                        total: file.total,
+                    };
+                    state.changes[safe] = {
+                        ...previous,
+                        selections: { ...previous.selections, all: inclusion, [scope]: inclusion },
+                    };
+                }
+            },
+            false,
+        );
     }
 
     private async write(
@@ -406,6 +458,7 @@ export class ChangelistStore {
                     totalChanges: total,
                     selections: {
                         ...previous.selections,
+                        all: { contentId, lineIds: [], total },
                         [scope]: { contentId, lineIds: [], total },
                     },
                 };

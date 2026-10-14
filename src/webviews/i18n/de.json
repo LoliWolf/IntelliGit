@@ -475,5 +475,6 @@
     "changes.noChanges": "Keine Änderungen",
     "changes.useSelection": "Auswahl für Commit verwenden",
     "changes.wholeFile": "Gesamte Datei auswählen",
-    "changes.reviewSelection": "Teilauswahl muss geprüft werden"
+    "changes.reviewSelection": "Teilauswahl muss geprüft werden",
+    "changes.reviewRecovery": "Wiederherstellung des Teilindex prüfen"
 }

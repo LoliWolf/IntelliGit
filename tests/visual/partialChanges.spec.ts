@@ -3,6 +3,41 @@ import path from "node:path";
 import type { ChangelistState } from "../../src/webviews/protocol/changeSelection";
 import { expect, test } from "./playwright/harnessPage";
 
+test("recovery review is explicitly routed to the captured repository", async ({
+    page,
+    mountHarness,
+}) => {
+    const harness = await mountHarness("commit-panel", { webviewFixture: "dirty.json" });
+    await page.evaluate(() =>
+        window.dispatchEvent(
+            new MessageEvent("message", {
+                data: {
+                    type: "setChangelists",
+                    repositoryRoot: "<ROOT>",
+                    busy: false,
+                    hasRecoveryIssues: true,
+                    state: {
+                        revision: 1,
+                        activeId: "default",
+                        lists: [{ id: "default", name: "Default" }],
+                        files: {},
+                        changes: {},
+                    },
+                },
+            }),
+        ),
+    );
+    const button = page.getByRole("button", { name: "Review partial-index recovery", exact: true });
+    await expect(button).toBeVisible();
+    await button.click();
+    expect(await harness.recordedMessages()).toContainEqual({
+        type: "changelistAction",
+        repositoryRoot: "<ROOT>",
+        revision: 1,
+        action: "reviewRecovery",
+        listId: "all",
+    });
+});
 test("partial selections preserve their IDs, read-only preview and commit draft after a failure", async ({
     page,
     mountHarness,

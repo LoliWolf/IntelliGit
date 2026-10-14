@@ -871,5 +871,9 @@
     "Selected changes: {path}": "Ausgewählte Änderungen: {path}",
     "Save the native editor before selecting partial changes.": "Speichern Sie den nativen Editor vor der Auswahl von Teiländerungen.",
     "Selected changes failed: {message}": "Ausgewählte Änderungen fehlgeschlagen: {message}",
-    "Changelist action failed: {message}": "Änderungslistenaktion fehlgeschlagen: {message}"
+    "Changelist action failed: {message}": "Änderungslistenaktion fehlgeschlagen: {message}",
+    "Review partial-index recovery": "Wiederherstellung des Teilindex prüfen",
+    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "Diesen isolierten Wiederherstellungsdatensatz verwerfen? Git-Verlauf, Index, Arbeitsverzeichnis und Sperren bleiben unverändert.",
+    "Discard recovery record": "Wiederherstellungsdatensatz verwerfen",
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Der ausgewählte Commit war erfolgreich, aber seine Auswahlmetadaten müssen geprüft werden. Den Commit nicht erneut ausführen."
 }

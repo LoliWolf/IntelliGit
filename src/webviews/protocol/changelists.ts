@@ -7,7 +7,14 @@ export type ChangelistOutbound =
           type: "changelistAction";
           repositoryRoot: string;
           revision: number;
-          action: "create" | "rename" | "remove" | "activate" | "move" | "resetSelection";
+          action:
+              | "create"
+              | "rename"
+              | "remove"
+              | "activate"
+              | "move"
+              | "resetSelection"
+              | "reviewRecovery";
           listId?: string;
           paths?: string[];
           sourceListId?: string;
@@ -30,6 +37,7 @@ export type ChangelistReply = {
     repositoryRoot: string;
     state: ChangelistState;
     busy?: boolean;
+    hasRecoveryIssues?: boolean;
 };
 
 /** The standalone partial editor cannot choose another repository or filesystem target. */

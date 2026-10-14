@@ -465,5 +465,6 @@
     "changes.noChanges": "変更なし",
     "changes.useSelection": "選択をコミットに使用",
     "changes.wholeFile": "ファイル全体を選択",
-    "changes.reviewSelection": "部分選択を確認してください"
+    "changes.reviewSelection": "部分選択を確認してください",
+    "changes.reviewRecovery": "部分インデックスの復旧を確認"
 }
