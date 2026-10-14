@@ -428,6 +428,7 @@ export class ChangeWorkflowHost {
         }
         if (message.amend)
             throw new Error("Partial amend requires the whole-file commit workflow.");
+        if (paths.length > 64) throw new Error("Select 1 to 64 text files.");
         const selections: SelectedFileChanges[] = [];
         const inclusions: {
             path: string;

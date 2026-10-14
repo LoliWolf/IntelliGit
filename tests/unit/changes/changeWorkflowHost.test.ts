@@ -142,6 +142,28 @@ async function partialEditor() {
 }
 
 describe("root-bound selected-change host", () => {
+    it("rejects an oversized partial commit before opening its file snapshots", async () => {
+        const { panel, selection } = await partialEditor();
+        await panel.receiveMessage({ type: "useSelection", selection });
+        const head = git(["rev-parse", "HEAD"]);
+        const index = await readFile(path.join(root, ".git/index"));
+        await host.handle({
+            type: "commitChangelist",
+            repositoryRoot: root,
+            revision: store.get(root).revision,
+            listId: "all",
+            paths: ["file.txt", ...Array.from({ length: 64 }, (_, i) => `missing-${i}.txt`)],
+            message: "too many files",
+        });
+        expect(posted).toContainEqual(
+            expect.objectContaining({
+                type: "error",
+                message: expect.stringContaining("1 to 64 text files"),
+            }),
+        );
+        expect(git(["rev-parse", "HEAD"])).toBe(head);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+    });
     it("routes pending sidebar inclusion through real Git and does not commit the remainder twice", async () => {
         const { panel, selection } = await partialEditor();
         await panel.receiveMessage({ type: "useSelection", selection });
