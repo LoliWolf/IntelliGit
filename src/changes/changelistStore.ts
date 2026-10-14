@@ -304,21 +304,58 @@ export class ChangelistStore {
         lineIds: readonly string[],
         total: number,
     ): Promise<ChangelistState> {
+        return this.writeSelection(root, file, contentId, scope, lineIds, total);
+    }
+
+    /** Persists staging inclusion under the same root lease used by explicit commits. */
+    prepareStageInclusion(
+        root: string,
+        revision: number,
+        scope: string,
+        file: CommitInclusion,
+    ): Promise<ChangelistState> {
+        return this.writeSelection(
+            root,
+            file.path,
+            file.contentId,
+            scope,
+            file.lineIds,
+            file.total,
+            revision,
+        );
+    }
+
+    private writeSelection(
+        root: string,
+        file: string,
+        contentId: string,
+        scope: string,
+        lineIds: readonly string[],
+        total: number,
+        leaseRevision?: number,
+    ): Promise<ChangelistState> {
         const safe = assertRepoRelativePath(file);
         if (lineIds.length > 100_000 || !Number.isSafeInteger(total) || total < lineIds.length) {
             throw new Error("Invalid partial commit selection.");
         }
-        return this.write(root, undefined, (state) => {
-            if (scope !== "all") requireList(state, scope);
-            const previous = state.changes[safe] ?? { contentId, lines: {} };
-            state.changes[safe] = {
-                ...previous,
-                selections: {
-                    ...previous.selections,
-                    [scope]: { contentId, lineIds: [...lineIds], total },
-                },
-            };
-        });
+        return this.write(
+            root,
+            leaseRevision,
+            (state) => {
+                if (leaseRevision !== undefined && !this.commitLeases.has(root))
+                    throw new Error("A selected commit lease is required.");
+                if (scope !== "all") requireList(state, scope);
+                const previous = state.changes[safe] ?? { contentId, lines: {} };
+                state.changes[safe] = {
+                    ...previous,
+                    selections: {
+                        ...previous.selections,
+                        [scope]: { contentId, lineIds: [...lineIds], total },
+                    },
+                };
+            },
+            leaseRevision === undefined,
+        );
     }
 
     /** The explicit whole-file action removes only the current view's partial inclusion. */

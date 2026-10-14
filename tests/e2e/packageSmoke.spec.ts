@@ -202,16 +202,7 @@ test.describe("installed VSIX package smoke", () => {
             console.log(
                 `[package smoke] IntelliGit activity-bar webview mounted (#root children: ${childCount})`,
             );
-            await window.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+P`);
-            const input = window.locator(".quick-input-widget .quick-input-box input").first();
-            await expect(input).toBeVisible();
-            await input.fill("package-smoke.ts");
-            await window
-                .getByRole("option")
-                .filter({ hasText: "package-smoke.ts" })
-                .first()
-                .click();
-            await expect(input).toBeHidden();
+            await new Workbench(window).openFile("package-smoke.ts");
             const [historyWindow] = await Promise.all([
                 electronApp.waitForEvent("window", { timeout: 30_000 }),
                 new Workbench(window).runCommand("IntelliGit: Show File History"),

@@ -876,5 +876,6 @@
     "Discard this recovery record? Git history, index, worktree and locks will not change.": "この復旧記録を破棄しますか？Git の履歴、インデックス、作業ツリー、ロックは変更されません。",
     "Discard recovery record": "復旧記録を破棄",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "選択したコミットは成功しましたが、選択メタデータの確認が必要です。コミットを再実行しないでください。",
-    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "選択したコミットは反映されていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。"
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "選択したコミットは反映されていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。",
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "選択した変更はステージされていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。"
 }

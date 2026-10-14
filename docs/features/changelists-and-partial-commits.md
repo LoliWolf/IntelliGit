@@ -89,6 +89,13 @@ attempt. Confirmed or uncertain ref publication keeps the new fence, even if
 another process subsequently resets HEAD back to its old value. Failed metadata
 restoration is reported for review instead of silently broadening the selection.
 
+Working-tree staging also reserves the shared metadata lease and persists only
+its current scope before publishing the index. A refused stage restores that
+scope's prior inclusion under compare-and-swap, so dismissing a dirty native
+buffer does not change what a later Commit panel action includes. A published
+index requiring recovery retains its inclusion; failed rollback persistence
+reports an explicit selection-review warning.
+
 ## Performance and Verification
 
 Diffs are requested for the active file, not once per list. Text/snapshot caches

@@ -37,6 +37,9 @@ vi.mock("vscode", () => {
 });
 import { ChangeWorkflowHost } from "../../../src/views/ChangeWorkflowHost";
 import { ChangelistStore } from "../../../src/changes/changelistStore";
+import { PartialChanges } from "../../../src/git/partialChanges";
+import { PartialIndexPublicationError } from "../../../src/git/partialIndexTransaction";
+import * as vscode from "vscode";
 import { GitExecutor } from "../../../src/git/executor";
 import { GitOps } from "../../../src/git/operations";
 import { changeIds } from "../../../src/changes/selection";
@@ -116,6 +119,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
     vi.restoreAllMocks();
+    (vscode.workspace.textDocuments as vscode.TextDocument[]).length = 0;
     host?.dispose();
     for (const panel of getCreatedWebviewPanels()) panel.dispose();
     resetCreatedWebviewPanelsForTests();
@@ -143,6 +147,156 @@ async function partialEditor() {
 }
 
 describe("root-bound selected-change host", () => {
+    it.each([false, true])(
+        "restores staging inclusion after a dirty-buffer refusal and later commits the prior choice (existing=%s)",
+        async (existing) => {
+            const { panel, selection, messages } = await partialEditor();
+            if (existing) {
+                const data = messages.find((message) => message.type === "partialFile");
+                if (!data || data.type !== "partialFile") throw new Error("Missing snapshot");
+                await panel.receiveMessage({
+                    type: "useSelection",
+                    selection: {
+                        snapshotId: data.file.snapshotId,
+                        lineIds: changeIds(data.file.blocks.slice(1)),
+                    },
+                });
+            }
+            const before = store.get(root).changes["file.txt"].selections;
+            const index = await readFile(path.join(root, ".git/index"));
+            (vscode.workspace.textDocuments as vscode.TextDocument[]).push({
+                uri: { scheme: "file", fsPath: path.join(root, "file.txt") },
+                isDirty: true,
+            } as vscode.TextDocument);
+            await panel.receiveMessage({ type: "stageSelection", selection });
+            expect(messages).toContainEqual(
+                expect.objectContaining({
+                    type: "partialError",
+                    message: expect.stringContaining("Save the native editor"),
+                }),
+            );
+            expect(store.get(root).changes["file.txt"].selections).toEqual(before);
+            expect(new ChangelistStore(storage).get(root).changes["file.txt"].selections).toEqual(
+                before,
+            );
+            expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+            expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+            (vscode.workspace.textDocuments as vscode.TextDocument[]).length = 0;
+            await host.handle({
+                type: "commitChangelist",
+                repositoryRoot: root,
+                revision: store.get(root).revision,
+                listId: "all",
+                paths: ["file.txt"],
+                message: "original inclusion after refused staging",
+            });
+            expect(git(["show", "HEAD:file.txt"])).toBe(
+                existing ? base.replace("line 80\n", "remaining\n") : working,
+            );
+        },
+    );
+
+    it.each(["empty", "foreign lock"] as const)(
+        "does not keep a staging inclusion after %s refusal",
+        async (refusal) => {
+            const { panel, selection, messages } = await partialEditor();
+            const before = store.get(root).changes["file.txt"].selections;
+            const index = await readFile(path.join(root, ".git/index"));
+            const lock = path.join(root, ".git/index.lock");
+            if (refusal === "foreign lock") await writeFile(lock, "foreign owner");
+            await panel.receiveMessage({
+                type: "stageSelection",
+                selection: { ...selection, lineIds: refusal === "empty" ? [] : selection.lineIds },
+            });
+            expect(messages).toContainEqual(expect.objectContaining({ type: "partialError" }));
+            expect(store.get(root).changes["file.txt"].selections).toEqual(before);
+            expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+            expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+            expect(await readFile(path.join(root, "file.txt"), "utf8")).toBe(working);
+            if (refusal === "foreign lock")
+                expect(await readFile(lock, "utf8")).toBe("foreign owner");
+        },
+    );
+
+    it("refuses staging before changing the index when inclusion cannot be persisted", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const index = await readFile(path.join(root, ".git/index"));
+        persistenceFailure = "before";
+        await panel.receiveMessage({ type: "stageSelection", selection });
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("metadata storage"),
+            }),
+        );
+        expect(store.get(root).changes["file.txt"].selections).toBeUndefined();
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+    });
+
+    it("keeps staging inclusion when a published index needs recovery", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const original = PartialChanges.prototype.stage;
+        vi.spyOn(PartialChanges.prototype, "stage").mockImplementation(async function (
+            this: PartialChanges,
+            ...args
+        ) {
+            await original.apply(this, args);
+            throw new PartialIndexPublicationError("index durability needs recovery");
+        });
+        await panel.receiveMessage({ type: "stageSelection", selection });
+        expect(git(["show", ":file.txt"])).toBe(first);
+        expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+        expect(store.get(root).changes["file.txt"].selections?.all.lineIds).toEqual(
+            selection.lineIds,
+        );
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("durability"),
+            }),
+        );
+    });
+
+    it("warns and retains staging inclusion when rollback persistence fails", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        vi.spyOn(PartialChanges.prototype, "stage").mockImplementation(async () => {
+            persistenceFailure = "before";
+            throw new Error("staging refused");
+        });
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        await panel.receiveMessage({ type: "stageSelection", selection });
+        expect(git(["show", ":file.txt"])).toBe(base);
+        expect(store.get(root).changes["file.txt"].selections?.all.lineIds).toEqual(
+            selection.lineIds,
+        );
+        expect(posted).toContainEqual(
+            expect.objectContaining({
+                type: "error",
+                message: expect.stringContaining("selection metadata could not be restored"),
+            }),
+        );
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("staging refused"),
+            }),
+        );
+    });
+
+    it("holds the shared metadata lease while staging and releases it on failure", async () => {
+        const { panel, selection } = await partialEditor();
+        vi.spyOn(PartialChanges.prototype, "stage").mockImplementation(async () => {
+            expect(store.isCommitting(root)).toBe(true);
+            await expect(
+                store.resetSelection(root, store.get(root).revision, "all", ["file.txt"]),
+            ).rejects.toThrow("cannot change");
+            throw new Error("staging refused");
+        });
+        await panel.receiveMessage({ type: "stageSelection", selection });
+        expect(store.isCommitting(root)).toBe(false);
+        expect(store.get(root).changes["file.txt"].selections).toBeUndefined();
+    });
+
     it.each([false, true])(
         "restores prior inclusion after a rejected hook (existing=%s)",
         async (existing) => {

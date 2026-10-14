@@ -876,5 +876,6 @@
     "Discard this recovery record? Git history, index, worktree and locks will not change.": "捨棄這筆復原記錄？Git 歷史、暫存區、工作區與鎖定均不會改變。",
     "Discard recovery record": "捨棄復原記錄",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "所選變更已提交，但選取中繼資料需要檢查。請勿重複提交。",
-    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "所選變更尚未提交，但無法還原選取中繼資料。請先檢查選取內容再重試。"
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "所選變更尚未提交，但無法還原選取中繼資料。請先檢查選取內容再重試。",
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "所選變更尚未暫存，但無法還原選取中繼資料。請先檢查選取內容再重試。"
 }

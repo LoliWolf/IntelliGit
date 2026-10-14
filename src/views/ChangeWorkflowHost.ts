@@ -291,19 +291,45 @@ export class ChangeWorkflowHost {
             },
             stage: async (selection) => {
                 const snapshot = this.assertFileSelection(file, selection);
-                if (snapshot.view.side === "working") {
-                    await this.store.recordSelection(
-                        this.deps.root,
-                        file,
-                        snapshot.contentId,
-                        listId,
-                        selection.lineIds,
-                        changeIds(snapshot.view.blocks).length,
-                    );
+                const release = await this.store.beginCommit(this.deps.root);
+                try {
+                    const previous = this.store.get(this.deps.root);
+                    const prepared =
+                        snapshot.view.side === "working"
+                            ? await this.store.prepareStageInclusion(
+                                  this.deps.root,
+                                  previous.revision,
+                                  listId,
+                                  {
+                                      path: file,
+                                      contentId: snapshot.contentId,
+                                      lineIds: selection.lineIds,
+                                      total: changeIds(snapshot.view.blocks).length,
+                                  },
+                              )
+                            : undefined;
+                    try {
+                        await this.partial.stage(selection, (files) =>
+                            assertChangeBuffersSaved(this.deps.root, files),
+                        );
+                    } catch (error) {
+                        if (prepared)
+                            await this.restoreFailedInclusion(
+                                error,
+                                previous,
+                                prepared,
+                                listId,
+                                [file],
+                                snapshot,
+                                vscode.l10n.t(
+                                    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.",
+                                ),
+                            );
+                        throw error;
+                    }
+                } finally {
+                    release();
                 }
-                await this.partial.stage(selection, (files) =>
-                    assertChangeBuffersSaved(this.deps.root, files),
-                );
                 await this.deps.actions.refreshData();
                 this.deps.actions.fireWorkingTreeChanged();
             },
@@ -526,31 +552,49 @@ export class ChangeWorkflowHost {
         try {
             return await this.partial.commit(selections, message, guard);
         } catch (error) {
-            if (
-                !(error instanceof PartialIndexPublicationError) &&
-                (await this.partial.canRestoreInclusion(snapshot))
-            ) {
-                try {
-                    await this.store.restoreCommitInclusion(
-                        this.deps.root,
-                        previous,
-                        prepared,
-                        scope,
-                        paths,
-                    );
-                } catch (restoreError) {
-                    console.error(
-                        "[IntelliGit] Failed selected commit inclusion needs review:",
-                        restoreError,
-                    );
-                    this.warnCommitReview(
-                        vscode.l10n.t(
-                            "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.",
-                        ),
-                    );
-                }
-            }
+            await this.restoreFailedInclusion(
+                error,
+                previous,
+                prepared,
+                scope,
+                paths,
+                snapshot,
+                vscode.l10n.t(
+                    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.",
+                ),
+            );
             throw error;
+        }
+    }
+
+    private async restoreFailedInclusion(
+        error: unknown,
+        previous: ChangelistState,
+        prepared: ChangelistState,
+        scope: string,
+        paths: readonly string[],
+        snapshot: Pick<PartialFileSnapshot, "root" | "gitDir" | "head" | "ref">,
+        warning: string,
+    ): Promise<void> {
+        if (
+            error instanceof PartialIndexPublicationError ||
+            !(await this.partial.canRestoreInclusion(snapshot))
+        )
+            return;
+        try {
+            await this.store.restoreCommitInclusion(
+                this.deps.root,
+                previous,
+                prepared,
+                scope,
+                paths,
+            );
+        } catch (restoreError) {
+            console.error(
+                "[IntelliGit] Failed selected action inclusion needs review:",
+                restoreError,
+            );
+            this.warnCommitReview(warning);
         }
     }
 

@@ -876,5 +876,6 @@
     "Discard this recovery record? Git history, index, worktree and locks will not change.": "Usunąć ten zapis odzyskiwania? Historia Git, indeks, drzewo robocze i blokady pozostaną bez zmian.",
     "Discard recovery record": "Usuń zapis odzyskiwania",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Wybrany commit został utworzony, ale metadane wyboru wymagają sprawdzenia. Nie ponawiaj commitu.",
-    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Wybrany commit nie został opublikowany, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą."
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Wybrany commit nie został opublikowany, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą.",
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Wybrane zmiany nie zostały dodane do indeksu, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą."
 }

@@ -49,6 +49,65 @@ async function createList(page: Page, frame: FrameLocator, name: string): Promis
 test.describe("Selected changes and changelists", () => {
     test.use({ scenario: "clean" });
 
+    test("restores sidebar inclusion after native dirty-buffer staging refusal", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        await createFiles(workspace.root, workspace.env);
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const index = await readFile(path.join(workspace.root, ".git/index"));
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const view = new IntelliGitView(page);
+            const sidebar = await view.reveal();
+            await expect(
+                sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
+            ).toBeVisible();
+            await chooseFile(sidebar);
+            const workbench = new Workbench(page);
+            await workbench.openFile(FILE);
+            const native = page.locator(".editor-group-container .monaco-editor:visible").first();
+            await native.click();
+            await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+A`);
+            await page.keyboard.type("unsaved native draft");
+            await expect(native.locator(".view-lines")).toContainText("unsaved native draft");
+            await sidebar.getByRole("button", { name: "Partial changes", exact: true }).click();
+            const editor = await view.revealPartialChanges(FILE);
+            await expect(editor.locator(".partial-block")).toHaveCount(2);
+            await editor.getByRole("checkbox", { name: "Select block 1", exact: true }).uncheck();
+            await editor.getByRole("button", { name: "Stage selected", exact: true }).click();
+            await expect(editor.getByRole("alert")).toContainText("Save the native editor");
+            expect(await readFile(path.join(workspace.root, ".git/index"))).toEqual(index);
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
+            await workbench.openFile(FILE);
+            await workbench.runCommand("File: Revert File");
+            await expect(native.locator(".view-lines")).not.toContainText("unsaved native draft");
+            await sidebar.locator("#commit-area-message").fill("Whole file after refused staging");
+            await sidebar.getByTestId("commit-action-commit").click();
+            await expect
+                .poll(() => runGit(workspace.root, ["show", `HEAD:${FILE}`], workspace.env))
+                .toBe(working);
+            expect(await runGit(workspace.root, ["show", `:${OTHER}`], workspace.env)).toBe(
+                "user staged\n",
+            );
+            expect(await runGit(workspace.root, ["show", `HEAD:${OTHER}`], workspace.env)).toBe(
+                "base\n",
+            );
+        } finally {
+            await app.close();
+        }
+    });
+
     test("stages a block and commits the same selection from the sidebar without including other content", async ({
         fixtureWorkspace,
     }, testInfo) => {

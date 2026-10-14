@@ -876,5 +876,6 @@
     "Discard this recovery record? Git history, index, worktree and locks will not change.": "이 복구 기록을 삭제할까요? Git 기록, 인덱스, 작업 트리 및 잠금은 변경되지 않습니다.",
     "Discard recovery record": "복구 기록 삭제",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "선택한 커밋은 완료되었지만 선택 메타데이터를 검토해야 합니다. 커밋을 다시 실행하지 마세요.",
-    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "선택한 커밋은 반영되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요."
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "선택한 커밋은 반영되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요.",
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "선택한 변경 사항은 스테이징되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요."
 }

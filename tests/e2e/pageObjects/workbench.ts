@@ -62,6 +62,29 @@ export class Workbench {
         }
     }
 
+    /** Reopens only a dismissed file picker; a visible picker failure remains an error. */
+    public async openFile(filename: string): Promise<void> {
+        const modifier = process.platform === "darwin" ? "Meta" : "Control";
+        const input = this.page.locator(".quick-input-widget .quick-input-box input").first();
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await this.page.keyboard.press(`${modifier}+P`);
+                await input.waitFor({ state: "visible", timeout: PALETTE_TIMEOUT_MS });
+                await input.fill(filename, { timeout: PALETTE_TIMEOUT_MS });
+                await this.page
+                    .getByRole("option")
+                    .filter({ hasText: filename })
+                    .first()
+                    .click({ timeout: PALETTE_TIMEOUT_MS });
+            } catch (error) {
+                if (attempt === PALETTE_ATTEMPTS || (await input.isVisible())) throw error;
+                continue;
+            }
+            await input.waitFor({ state: "hidden", timeout: PALETTE_TIMEOUT_MS });
+            return;
+        }
+    }
+
     /** Selects a visible command-palette quick-pick item by its accessible name. */
     public async pickQuickPick(label: string, timeoutMs?: number): Promise<void> {
         try {

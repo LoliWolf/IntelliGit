@@ -2,6 +2,32 @@ import { describe, expect, it } from "vitest";
 import { ChangelistStore } from "../../../src/changes/changelistStore";
 
 describe("worktree changelist metadata", () => {
+    it("prepares only the staging scope with revision CAS under a shared lease", async () => {
+        const store = new ChangelistStore();
+        let state = await store.create("/one", 0, "Feature");
+        const feature = state.lists[1].id;
+        state = await store.recordSelection("/one", "one.txt", "content", "all", ["0:2"], 3);
+        const file = { path: "one.txt", contentId: "content", lineIds: ["0:1"], total: 3 };
+        await expect(
+            store.prepareStageInclusion("/one", state.revision, feature, file),
+        ).rejects.toThrow("lease");
+        const release = await store.beginCommit("/one");
+        try {
+            await expect(
+                store.prepareStageInclusion("/one", state.revision - 1, feature, file),
+            ).rejects.toThrow("changed");
+            const prepared = await store.prepareStageInclusion(
+                "/one",
+                state.revision,
+                feature,
+                file,
+            );
+            expect(prepared.changes["one.txt"].selections?.all.lineIds).toEqual(["0:2"]);
+            expect(prepared.changes["one.txt"].selections?.[feature].lineIds).toEqual(["0:1"]);
+        } finally {
+            release();
+        }
+    });
     it("restores only overwritten scope choices and removes newly-created inclusion", async () => {
         const store = new ChangelistStore();
         let state = await store.create("/one", 0, "Feature");
