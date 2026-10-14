@@ -2,6 +2,31 @@ import { describe, expect, it } from "vitest";
 import { ChangelistStore } from "../../../src/changes/changelistStore";
 
 describe("worktree changelist metadata", () => {
+    it("restores only overwritten scope choices and removes newly-created inclusion", async () => {
+        const store = new ChangelistStore();
+        let state = await store.create("/one", 0, "Feature");
+        const feature = state.lists[1].id;
+        state = await store.recordSelection("/one", "one.txt", "before", "all", ["0:2"], 3);
+        const previous = state;
+        const release = await store.beginCommit("/one");
+        try {
+            const attempted = await store.prepareCommitInclusion("/one", state.revision, feature, [
+                { path: "one.txt", contentId: "before", lineIds: ["0:1"], total: 3 },
+            ]);
+            const restored = await store.restoreCommitInclusion(
+                "/one",
+                previous,
+                attempted,
+                feature,
+                ["one.txt"],
+            );
+            expect(restored.changes["one.txt"].selections).toEqual(
+                previous.changes["one.txt"].selections,
+            );
+        } finally {
+            release();
+        }
+    });
     it("persists both named and All inclusion only under an owned commit lease", async () => {
         const store = new ChangelistStore();
         let state = await store.create("/one", 0, "Feature");

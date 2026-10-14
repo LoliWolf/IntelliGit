@@ -873,7 +873,8 @@
     "Selected changes failed: {message}": "Selected changes failed: {message}",
     "Changelist action failed: {message}": "Changelist action failed: {message}",
     "Review partial-index recovery": "Review partial-index recovery",
-    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.",
+    "Discard this recovery record? Git history, index, worktree and locks will not change.": "Discard this recovery record? Git history, index, worktree and locks will not change.",
     "Discard recovery record": "Discard recovery record",
-    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit."
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.",
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying."
 }

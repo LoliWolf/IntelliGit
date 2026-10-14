@@ -67,6 +67,12 @@ index, worktree or locks. Live foreign PIDs are reported conservatively and
 are not unlocked or discarded; one such record does not block other recovery
 entries or read-only snapshots.
 
+Missing, invalid or oversized journal files are reported individually, not used
+to block every recovery entry. Native review can explicitly discard their contained,
+regular record directories even when the journal cannot be parsed. Pending records
+that have become valid are not discarded through this unreadable-record path.
+Unknown index locks are never removed with their metadata.
+
 List writes use shared workspace storage, revision compare-and-swap and root-bound
 commit leases. Stale assignments/selections require explicit review. Corrupt
 metadata is refused, not overwritten.
@@ -76,6 +82,12 @@ publication. A persistence failure aborts before committing; failed post-commit
 metadata consumption leaves a durable old-snapshot fence and a success-with-review
 warning, not a whole-file fallback. Index-side unstaging does not alter saved
 working-tree inclusion.
+
+If publication has not started and the captured repository/HEAD/ref remain
+unchanged, a failed commit restores only the inclusion fields overwritten by that
+attempt. Confirmed or uncertain ref publication keeps the new fence, even if
+another process subsequently resets HEAD back to its old value. Failed metadata
+restoration is reported for review instead of silently broadening the selection.
 
 ## Performance and Verification
 

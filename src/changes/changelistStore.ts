@@ -383,6 +383,49 @@ export class ChangelistStore {
         );
     }
 
+    /** Rolls back only this attempt's scope fields, retaining unrelated observations and choices. */
+    restoreCommitInclusion(
+        root: string,
+        previous: ChangelistState,
+        attempted: ChangelistState,
+        scope: string,
+        paths: readonly string[],
+    ): Promise<ChangelistState> {
+        return this.write(
+            root,
+            undefined,
+            (state) => {
+                if (!this.commitLeases.has(root))
+                    throw new Error("A selected commit lease is required.");
+                for (const file of paths.map(assertRepoRelativePath)) {
+                    const current = state.changes[file];
+                    if (!current?.selections) continue;
+                    for (const key of new Set(["all", scope])) {
+                        if (
+                            JSON.stringify(current.selections[key]) !==
+                            JSON.stringify(attempted.changes[file]?.selections?.[key])
+                        )
+                            continue;
+                        const before = previous.changes[file]?.selections?.[key];
+                        if (before === undefined) delete current.selections[key];
+                        else current.selections[key] = structuredClone(before);
+                    }
+                    if (Object.keys(current.selections).length === 0) delete current.selections;
+                    if (
+                        !previous.changes[file] &&
+                        !current.selections &&
+                        current.contentId === attempted.changes[file]?.contentId &&
+                        Object.keys(current.lines).length === 0 &&
+                        current.totalChanges === undefined &&
+                        current.stale === undefined
+                    )
+                        delete state.changes[file];
+                }
+            },
+            false,
+        );
+    }
+
     private async write(
         root: string,
         revision: number | undefined,

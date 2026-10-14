@@ -873,7 +873,8 @@
     "Selected changes failed: {message}": "Operacja na wybranych zmianach nie powiodła się: {message}",
     "Changelist action failed: {message}": "Operacja na liście zmian nie powiodła się: {message}",
     "Review partial-index recovery": "Sprawdź odzyskiwanie częściowego indeksu",
-    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "Usunąć ten odizolowany zapis odzyskiwania? Historia Git, indeks, drzewo robocze i blokady pozostaną bez zmian.",
+    "Discard this recovery record? Git history, index, worktree and locks will not change.": "Usunąć ten zapis odzyskiwania? Historia Git, indeks, drzewo robocze i blokady pozostaną bez zmian.",
     "Discard recovery record": "Usuń zapis odzyskiwania",
-    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Wybrany commit został utworzony, ale metadane wyboru wymagają sprawdzenia. Nie ponawiaj commitu."
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Wybrany commit został utworzony, ale metadane wyboru wymagają sprawdzenia. Nie ponawiaj commitu.",
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Wybrany commit nie został opublikowany, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą."
 }

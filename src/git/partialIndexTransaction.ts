@@ -30,12 +30,17 @@ interface IndexJournal {
 /** Refused transactions retain evidence, while live owners are never discarded. */
 export interface PartialRecoveryIssue {
     id: string;
-    kind: "active" | "blocked" | "quarantined";
+    kind: "active" | "blocked" | "quarantined" | "unreadable";
+    location?: "pending" | "quarantined";
     reason: string;
     commit?: string;
 }
 
 class RecoveryRefusal extends Error {}
+class UnreadableJournal extends Error {}
+
+/** Callers must retain metadata fences whenever ref publication happened or is uncertain. */
+export class PartialIndexPublicationError extends Error {}
 
 /** Test seams fire at durable boundaries, never through the webview protocol. */
 export interface PartialTransactionFaults {
@@ -71,11 +76,14 @@ export async function publishPartialIndex(
     await writeJournal(directory, journal);
     const lockPath = `${snapshot.indexPath}.lock`;
     let lock: FileHandle | undefined;
+    let lockAcquired = false;
     let published = false;
+    let refUpdateStarted = false;
     let completed = false;
     let durable = false;
     try {
         lock = await open(lockPath, "wx", 0o600);
+        lockAcquired = true;
         const stats = await lock.stat({ bigint: true });
         journal.lock = { ino: String(stats.ino), dev: String(stats.dev) };
         await writeJournal(directory, journal);
@@ -88,6 +96,7 @@ export async function publishPartialIndex(
         await recheck();
         await assertPreparedLock(lockPath, journal);
         if (newHead) {
+            refUpdateStarted = true;
             await executor.runBinary([
                 "update-ref",
                 "-m",
@@ -112,40 +121,70 @@ export async function publishPartialIndex(
         durable = true;
     } catch (error) {
         if (newHead) {
-            const current = await executor.runBinary(["rev-parse", "--verify", snapshot.ref], {
-                expectedExitCodes: [0, 1],
-            });
-            published = published || current.stdout.toString("utf8").trim() === newHead;
+            published = published || (await refPointsToCommit(executor, snapshot.ref, newHead));
         }
         if (published && !completed) {
-            throw new Error(
+            throw new PartialIndexPublicationError(
                 "The commit succeeded, but its index reconciliation needs recovery. Do not retry the commit.",
                 { cause: error },
             );
         }
         if (completed) {
-            throw new Error(
+            throw new PartialIndexPublicationError(
                 newHead
                     ? "The commit succeeded, but its index durability needs recovery. Do not retry the commit."
                     : "The selected changes were staged, but index durability needs recovery.",
                 { cause: error },
             );
         }
+        if (refUpdateStarted) {
+            throw new PartialIndexPublicationError(
+                "The selected commit publication could not be confirmed. Review Git history and recovery records before retrying.",
+                { cause: error },
+            );
+        }
         throw error;
     } finally {
         await lock?.close();
-        if (durable || (!published && !completed)) {
-            try {
-                await removeOwnedIndexLock(lockPath, journal);
-                await rm(directory, { recursive: true, force: true });
-            } catch (error) {
-                if (!completed) throw error;
-                console.error(
-                    "[IntelliGit] Partial-index cleanup retained its recovery journal:",
-                    error,
-                );
-            }
+        if (durable || (!refUpdateStarted && !published && !completed)) {
+            await cleanupPartialRecord(directory, lockPath, journal, {
+                durable,
+                completed,
+                lockAcquired,
+            });
         }
+    }
+}
+
+async function cleanupPartialRecord(
+    directory: string,
+    lock: string,
+    journal: IndexJournal,
+    progress: { durable: boolean; completed: boolean; lockAcquired: boolean },
+): Promise<void> {
+    try {
+        if (progress.durable) await removePreparedIndexLock(lock, journal);
+        else if (progress.lockAcquired && journal.lock) await releaseUnpublishedLock(lock, journal);
+        else if (progress.lockAcquired) return;
+        await rm(directory, { recursive: true, force: true });
+    } catch (error) {
+        if (!progress.completed) throw error;
+        console.error("[IntelliGit] Partial-index cleanup retained its recovery journal:", error);
+    }
+}
+
+async function refPointsToCommit(
+    executor: GitExecutor,
+    ref: string,
+    commit: string,
+): Promise<boolean> {
+    try {
+        const current = await executor.runBinary(["rev-parse", "--verify", ref], {
+            expectedExitCodes: [0, 1],
+        });
+        return current.stdout.toString("utf8").trim() === commit;
+    } catch {
+        return false;
     }
 }
 
@@ -294,11 +333,24 @@ export async function recoverPartialIndexes(
     for (const name of names) {
         const directory = path.join(parent, name);
         await assertContainedParent(gitDir, path.join(directory, "journal.json"));
-        const record = await readJournal(directory, root, gitDir);
+        let record: IndexJournal;
+        try {
+            record = await readJournal(directory, root, gitDir);
+        } catch (error) {
+            if (!(error instanceof UnreadableJournal)) throw error;
+            issues.push({
+                id: name,
+                kind: "unreadable",
+                location: "pending",
+                reason: "The partial-index journal is unreadable. No index lock was removed.",
+            });
+            continue;
+        }
         if (record.pid !== process.pid && isAlive(record.pid)) {
             issues.push({
                 id: name,
                 kind: "active",
+                location: "pending",
                 reason: `Another process may own this partial-index recovery (PID ${record.pid}).`,
                 commit: record.newHead,
             });
@@ -312,6 +364,7 @@ export async function recoverPartialIndexes(
                 issues.push({
                     id: name,
                     kind: "blocked",
+                    location: "pending",
                     reason: "Review quarantined partial-index records before recovering more.",
                     commit: record.newHead,
                 });
@@ -322,7 +375,19 @@ export async function recoverPartialIndexes(
     for (const id of await recoveryNames(quarantine)) {
         const directory = path.join(quarantine, id);
         await assertContainedParent(gitDir, path.join(directory, "journal.json"));
-        const record = await readJournal(directory, root, gitDir);
+        let record: IndexJournal;
+        try {
+            record = await readJournal(directory, root, gitDir);
+        } catch (error) {
+            if (!(error instanceof UnreadableJournal)) throw error;
+            issues.push({
+                id,
+                kind: "unreadable",
+                location: "quarantined",
+                reason: "The quarantined partial-index journal is unreadable.",
+            });
+            continue;
+        }
         issues.push({
             id,
             kind: "quarantined",
@@ -338,14 +403,27 @@ export async function discardPartialRecovery(
     root: string,
     gitDir: string,
     id: string,
+    location: "pending" | "quarantined" = "quarantined",
 ): Promise<void> {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid recovery record.");
-    const parent = path.join(gitDir, "intelligit", "partial-index-quarantine");
+    const parent = path.join(
+        gitDir,
+        "intelligit",
+        location === "pending" ? "partial-index" : "partial-index-quarantine",
+    );
     if (!(await recoveryNames(parent)).includes(id))
         throw new Error("The recovery record changed.");
     const directory = path.join(parent, id);
     await assertContainedParent(gitDir, path.join(directory, "journal.json"));
-    await readJournal(directory, root, gitDir);
+    await assertRegularRecord(directory);
+    if (location === "pending") {
+        try {
+            await readJournal(directory, root, gitDir);
+            throw new Error("The recovery record is now readable and cannot be discarded here.");
+        } catch (error) {
+            if (!(error instanceof UnreadableJournal)) throw error;
+        }
+    }
     await rm(directory, { recursive: true });
     await syncDirectory(parent);
 }
@@ -369,7 +447,7 @@ async function recoverOne(
         return false;
     }
     if (head === journal.oldHead && currentHash === journal.indexHash) {
-        await removeOwnedIndexLock(`${journal.indexPath}.lock`, journal);
+        await releaseUnpublishedLock(`${journal.indexPath}.lock`, journal);
         await rm(directory, { recursive: true, force: true });
         return false;
     }
@@ -415,6 +493,28 @@ async function recoverOne(
         return true;
     } finally {
         await lock?.close();
+    }
+}
+
+async function releaseUnpublishedLock(lock: string, journal: IndexJournal): Promise<void> {
+    try {
+        const stats = await lstat(lock);
+        if (!(await ownsIndexLock(lock, journal)) || stats.size > 64 * 1024 * 1024)
+            throw new RecoveryRefusal(
+                "The unpublished transaction lock ownership changed. The foreign lock is retained.",
+            );
+        const bytes = await readFile(lock);
+        if (
+            (bytes.length !== 0 && changeFingerprint(bytes) !== journal.preparedHash) ||
+            !(await ownsIndexLock(lock, journal))
+        )
+            throw new RecoveryRefusal(
+                "The unpublished transaction lock ownership changed. The foreign lock is retained.",
+            );
+        await rm(lock);
+        await syncDirectory(journal.gitDir);
+    } catch (error) {
+        if (!isMissing(error)) throw error;
     }
 }
 
@@ -503,6 +603,8 @@ async function createTransactionDirectory(gitDir: string): Promise<string> {
         throw new Error("Review quarantined partial-index records before committing more.");
     }
     const parent = await createRecoveryParent(gitDir, "partial-index");
+    if ((await recoveryNames(parent)).length >= 32)
+        throw new Error("Review partial-index recovery records before committing more.");
     const directory = path.join(parent, randomUUID());
     await assertContainedParent(gitDir, directory);
     await mkdir(directory, { mode: 0o700 });
@@ -527,10 +629,28 @@ async function durableFile(file: string, bytes: Buffer): Promise<void> {
     }
 }
 
-async function readJournal(directory: string, root: string, gitDir: string): Promise<IndexJournal> {
+async function assertRegularRecord(directory: string): Promise<void> {
     const directoryStats = await lstat(directory);
     if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink())
         throw new Error("Invalid partial-index journal directory.");
+}
+
+async function readJournal(directory: string, root: string, gitDir: string): Promise<IndexJournal> {
+    await assertRegularRecord(directory);
+    try {
+        return await parseJournal(directory, root, gitDir);
+    } catch (error) {
+        throw new UnreadableJournal("The partial-index journal is missing or invalid.", {
+            cause: error,
+        });
+    }
+}
+
+async function parseJournal(
+    directory: string,
+    root: string,
+    gitDir: string,
+): Promise<IndexJournal> {
     const file = path.join(directory, "journal.json");
     const stats = await lstat(file);
     if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 16_384) {
@@ -571,10 +691,6 @@ async function ownsIndexLock(file: string, journal: IndexJournal): Promise<boole
         if (isMissing(error)) return false;
         throw error;
     }
-}
-
-async function removeOwnedIndexLock(file: string, journal: IndexJournal): Promise<void> {
-    if (await ownsIndexLock(file, journal)) await rm(file);
 }
 
 async function assertPreparedLock(file: string, journal: IndexJournal): Promise<void> {

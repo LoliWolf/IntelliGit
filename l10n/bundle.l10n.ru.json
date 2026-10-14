@@ -873,7 +873,8 @@
     "Selected changes failed: {message}": "Ошибка обработки выбранных изменений: {message}",
     "Changelist action failed: {message}": "Ошибка действия списка изменений: {message}",
     "Review partial-index recovery": "Проверить восстановление частичного индекса",
-    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "Удалить эту изолированную запись восстановления? История Git, индекс, рабочее дерево и блокировки не изменятся.",
+    "Discard this recovery record? Git history, index, worktree and locks will not change.": "Удалить эту запись восстановления? История Git, индекс, рабочее дерево и блокировки не изменятся.",
     "Discard recovery record": "Удалить запись восстановления",
-    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Выбранный коммит создан, но метаданные выбора требуют проверки. Не повторяйте коммит."
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Выбранный коммит создан, но метаданные выбора требуют проверки. Не повторяйте коммит.",
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Выбранный коммит не опубликован, но восстановить метаданные выбора не удалось. Проверьте выбор перед повторной попыткой."
 }

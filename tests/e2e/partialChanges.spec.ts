@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { FrameLocator, Page } from "@playwright/test";
@@ -355,6 +355,51 @@ test.describe("Selected changes and changelists", () => {
             );
             expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
             await runGit(workspace.root, ["add", "--", OTHER], workspace.env);
+        } finally {
+            await app.close();
+        }
+    });
+
+    test("reviews an unreadable recovery record without deleting a foreign index lock", async ({
+        fixtureWorkspace,
+    }) => {
+        const { workspace } = fixtureWorkspace;
+        await createFiles(workspace.root, workspace.env);
+        const id = "00000000-0000-4000-8000-000000000001";
+        const directory = path.join(workspace.root, ".git/intelligit/partial-index", id);
+        await mkdir(directory, { recursive: true });
+        await writeFile(path.join(directory, "journal.json"), "{bad json");
+        const lock = path.join(workspace.root, ".git/index.lock");
+        await writeFile(lock, "foreign lock preserved");
+        const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
+        const index = await readFile(path.join(workspace.root, ".git/index"));
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const sidebar = await new IntelliGitView(page).reveal();
+            const review = sidebar.getByRole("button", {
+                name: "Review partial-index recovery",
+                exact: true,
+            });
+            await expect(review).toBeVisible();
+            await review.click();
+            await page.locator(".quick-input-widget").getByText(id, { exact: true }).click();
+            await page
+                .getByRole("button", { name: "Discard recovery record", exact: true })
+                .click();
+            await expect(review).toHaveCount(0);
+            expect(await readFile(lock, "utf8")).toBe("foreign lock preserved");
+            expect(await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env)).toBe(head);
+            expect(await readFile(path.join(workspace.root, ".git/index"))).toEqual(index);
+            expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
         } finally {
             await app.close();
         }

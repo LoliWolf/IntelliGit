@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -115,6 +115,7 @@ beforeEach(async () => {
     await host.reconcile(files);
 });
 afterEach(async () => {
+    vi.restoreAllMocks();
     host?.dispose();
     for (const panel of getCreatedWebviewPanels()) panel.dispose();
     resetCreatedWebviewPanelsForTests();
@@ -142,6 +143,93 @@ async function partialEditor() {
 }
 
 describe("root-bound selected-change host", () => {
+    it.each([false, true])(
+        "restores prior inclusion after a rejected hook (existing=%s)",
+        async (existing) => {
+            const { panel, selection, messages } = await partialEditor();
+            if (existing) {
+                const file = messages.find((message) => message.type === "partialFile");
+                if (!file || file.type !== "partialFile") throw new Error("Missing snapshot");
+                await panel.receiveMessage({
+                    type: "useSelection",
+                    selection: {
+                        snapshotId: file.file.snapshotId,
+                        lineIds: changeIds(file.file.blocks.slice(1)),
+                    },
+                });
+            }
+            const before = store.get(root).changes["file.txt"].selections;
+            const hook = path.join(root, ".git/hooks/pre-commit");
+            await writeFile(hook, "#!/bin/sh\nexit 1\n");
+            await chmod(hook, 0o755);
+            await panel.receiveMessage({
+                type: "commitSelection",
+                selection,
+                message: "hook rejection",
+            });
+            expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+            expect(store.get(root).changes["file.txt"].selections).toEqual(before);
+            expect(messages).toContainEqual(expect.objectContaining({ type: "partialError" }));
+        },
+    );
+
+    it("does not restore old inclusion after actual publication even if HEAD was reset back", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const original = GitExecutor.prototype.runBinary;
+        vi.spyOn(GitExecutor.prototype, "runBinary").mockImplementation(async function (
+            this: GitExecutor,
+            args,
+            options,
+        ) {
+            const result = await original.call(this, args, options);
+            if (args[0] === "update-ref") git(["update-ref", args[3], args[5], args[4]]);
+            return result;
+        });
+        await panel.receiveMessage({
+            type: "commitSelection",
+            selection,
+            message: "published then reset",
+        });
+        expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+        expect(store.get(root).changes["file.txt"].selections?.all.lineIds).toEqual(
+            selection.lineIds,
+        );
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("commit succeeded"),
+            }),
+        );
+    });
+
+    it("retains a fence when ref publication cannot be confirmed", async () => {
+        const { panel, selection, messages } = await partialEditor();
+        const original = GitExecutor.prototype.runBinary;
+        vi.spyOn(GitExecutor.prototype, "runBinary").mockImplementation(function (
+            this: GitExecutor,
+            args,
+            options,
+        ) {
+            if (args[0] === "update-ref")
+                return Promise.reject(new Error("publication transport interrupted"));
+            return original.call(this, args, options);
+        });
+        await panel.receiveMessage({
+            type: "commitSelection",
+            selection,
+            message: "uncertain publication",
+        });
+        expect(git(["rev-parse", "HEAD"])).toBe(baselineHead);
+        expect(store.get(root).changes["file.txt"].selections?.all.lineIds).toEqual(
+            selection.lineIds,
+        );
+        expect(messages).toContainEqual(
+            expect.objectContaining({
+                type: "partialError",
+                message: expect.stringContaining("could not be confirmed"),
+            }),
+        );
+    });
     it("rejects an oversized partial commit before opening its file snapshots", async () => {
         const { panel, selection } = await partialEditor();
         await panel.receiveMessage({ type: "useSelection", selection });

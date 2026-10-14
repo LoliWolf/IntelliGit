@@ -9,6 +9,7 @@ import {
     assertPartialSnapshotCurrent,
     MAX_PARTIAL_TEXT_BYTES,
     readPartialSnapshot,
+    readPartialRef,
     type PartialFileSnapshot,
 } from "./partialSnapshot";
 import {
@@ -216,14 +217,38 @@ export class PartialChanges {
     }
 
     /** Dismisses only an explicitly chosen quarantined record for this captured worktree. */
-    async discardRecovery(id: string): Promise<void> {
+    async discardRecovery(
+        id: string,
+        location: "pending" | "quarantined" = "quarantined",
+    ): Promise<void> {
         await this.executor.runWithinMutationGate(async () => {
             const { root, gitDir } = await this.recoveryLocation();
-            await discardPartialRecovery(root, gitDir, id);
-            this.issues = this.issues.filter((issue) => issue.id !== id);
+            await discardPartialRecovery(root, gitDir, id, location);
+            this.issues = this.issues.filter(
+                (issue) => issue.id !== id || (issue.location ?? "quarantined") !== location,
+            );
         });
     }
 
+    /** Metadata rollback needs a proven unchanged head/ref and repository, not a guessed error string. */
+    async canRestoreInclusion(
+        snapshot: Pick<PartialFileSnapshot, "root" | "gitDir" | "head" | "ref">,
+    ): Promise<boolean> {
+        return this.executor.runWithinMutationGate(async () => {
+            try {
+                const { root, gitDir } = await this.recoveryLocation();
+                const head = (await this.executor.run(["rev-parse", "--verify", "HEAD"])).trim();
+                return (
+                    root === snapshot.root &&
+                    gitDir === snapshot.gitDir &&
+                    head === snapshot.head &&
+                    (await readPartialRef(this.executor)) === snapshot.ref
+                );
+            } catch {
+                return false;
+            }
+        });
+    }
     private async recoveryLocation(): Promise<{ root: string; gitDir: string }> {
         const root = await realpath(this.root);
         const actual = await realpath(

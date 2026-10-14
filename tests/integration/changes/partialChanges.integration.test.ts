@@ -59,6 +59,71 @@ afterEach(async () => {
 });
 
 describe("partial changes on real Git", () => {
+    it("retains a changed lock after an interrupted publication was reset to its original HEAD", async () => {
+        const view = await workflow.open("text.txt");
+        const oldHead = git(["rev-parse", "HEAD"]).trim();
+        await expect(
+            workflow.commit([firstBlock(view)], "published then reset", () => undefined, {
+                afterPublish: async () => {
+                    git(["update-ref", "HEAD", oldHead, git(["rev-parse", "HEAD"]).trim()]);
+                    throw new Error("interrupted");
+                },
+            }),
+        ).rejects.toThrow("commit succeeded");
+        const lock = path.join(root, ".git/index.lock");
+        await writeFile(lock, "changed foreign bytes");
+        const index = await readFile(path.join(root, ".git/index"));
+        expect(await workflow.recover()).toBe(false);
+        expect(workflow.recoveryIssues()[0].reason).toContain("foreign lock");
+        expect(await readFile(lock, "utf8")).toBe("changed foreign bytes");
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        expect(git(["rev-parse", "HEAD"]).trim()).toBe(oldHead);
+    });
+    it.each(["missing", "invalid", "oversized"] as const)(
+        "reports and discards an unreadable pending record (%s) without changing Git or a foreign lock",
+        async (kind) => {
+            const parent = path.join(root, ".git/intelligit/partial-index");
+            const id = "00000000-0000-4000-8000-000000000001";
+            const directory = path.join(parent, id);
+            await mkdir(directory, { recursive: true });
+            if (kind !== "missing")
+                await writeFile(
+                    path.join(directory, "journal.json"),
+                    kind === "invalid" ? "{bad json" : "x".repeat(16_385),
+                );
+            const head = git(["rev-parse", "HEAD"]);
+            const index = await readFile(path.join(root, ".git/index"));
+            const lock = path.join(root, ".git/index.lock");
+            await writeFile(lock, "foreign lock");
+            expect(await workflow.recover()).toBe(false);
+            expect(workflow.recoveryIssues()).toEqual([
+                expect.objectContaining({
+                    id,
+                    kind: "unreadable",
+                    location: "pending",
+                }),
+            ]);
+            await workflow.open("text.txt");
+            await workflow.discardRecovery(id, "pending");
+            expect(await readdir(parent)).toEqual([]);
+            expect(await readFile(lock, "utf8")).toBe("foreign lock");
+            expect(git(["rev-parse", "HEAD"])).toBe(head);
+            expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        },
+    );
+
+    it("allows explicit disposal of an unreadable quarantined record", async () => {
+        const parent = path.join(root, ".git/intelligit/partial-index-quarantine");
+        const id = "00000000-0000-4000-8000-000000000002";
+        await mkdir(path.join(parent, id), { recursive: true });
+        expect(await workflow.recover()).toBe(false);
+        expect(workflow.recoveryIssues()[0]).toMatchObject({
+            kind: "unreadable",
+            location: "quarantined",
+        });
+        await workflow.discardRecovery(id);
+        expect(await readdir(parent)).toEqual([]);
+    });
     it("stages one block without touching worktree, HEAD or unrelated staged content", async () => {
         await writeFile(path.join(root, "other.txt"), "user staged\n");
         git(["add", "--", "other.txt"]);

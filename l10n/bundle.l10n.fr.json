@@ -873,7 +873,8 @@
     "Selected changes failed: {message}": "Échec des modifications sélectionnées : {message}",
     "Changelist action failed: {message}": "Échec de l'action de liste de modifications : {message}",
     "Review partial-index recovery": "Examiner la récupération de l'index partiel",
-    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "Supprimer cet enregistrement de récupération en quarantaine ? L'historique Git, l'index, l'arbre de travail et les verrous resteront inchangés.",
+    "Discard this recovery record? Git history, index, worktree and locks will not change.": "Supprimer cet enregistrement de récupération ? L'historique Git, l'index, l'arbre de travail et les verrous resteront inchangés.",
     "Discard recovery record": "Supprimer l'enregistrement de récupération",
-    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Le commit sélectionné a réussi, mais ses métadonnées de sélection doivent être vérifiées. Ne relancez pas le commit."
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Le commit sélectionné a réussi, mais ses métadonnées de sélection doivent être vérifiées. Ne relancez pas le commit.",
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Le commit sélectionné n'a pas été publié, mais ses métadonnées de sélection n'ont pas pu être restaurées. Vérifiez la sélection avant de réessayer."
 }

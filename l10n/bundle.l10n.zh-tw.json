@@ -873,7 +873,8 @@
     "Selected changes failed: {message}": "所選變更操作失敗：{message}",
     "Changelist action failed: {message}": "變更清單操作失敗：{message}",
     "Review partial-index recovery": "檢查部分暫存區復原",
-    "Discard this quarantined recovery record? Git history, index, worktree and locks will not change.": "捨棄這筆隔離的復原記錄？Git 歷史、暫存區、工作區與鎖定均不會改變。",
+    "Discard this recovery record? Git history, index, worktree and locks will not change.": "捨棄這筆復原記錄？Git 歷史、暫存區、工作區與鎖定均不會改變。",
     "Discard recovery record": "捨棄復原記錄",
-    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "所選變更已提交，但選取中繼資料需要檢查。請勿重複提交。"
+    "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "所選變更已提交，但選取中繼資料需要檢查。請勿重複提交。",
+    "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "所選變更尚未提交，但無法還原選取中繼資料。請先檢查選取內容再重試。"
 }
