@@ -54,8 +54,8 @@ the operation fence, invalid roots, stale renderer callbacks, workspace-host
 affinity and unchanged local activation.
 
 `remoteSshWorkspace.spec.ts` is a separate opt-in test against an explicitly
-configured SSH host. It creates disposable remote repositories, installs the
-development payload and VS Code Server below its own temporary directory, and
+configured SSH host. It creates disposable remote repositories, deploys the
+selected extension payload and VS Code Server below its own temporary directory, and
 removes only those owned fixtures and server processes. It does not use a real
 project checkout or the user's existing remote VS Code Server installation.
 It requires a compatible local Remote-SSH extension and a remote Node executable:
@@ -68,7 +68,38 @@ bun x playwright test --config playwright.e2e.config.ts --project=e2e --no-deps 
   tests/e2e/remoteSshWorkspace.spec.ts
 ```
 
-The physical SSH backend probe passed for captured-root pull and merge. The full
-Remote-SSH UI attempt did not reach IntelliGit because initial VS Code Server
-download remained pending until the startup deadline, including with client-side
-download enabled. That attempt is unverified, not a passing end-to-end result.
+Optional inputs:
+
+- `INTELLIGIT_REMOTE_WORKSPACE_PARENT`: an absolute existing remote project
+  directory. A fresh `intelligit-ssh-workspace-*` child is allocated; cleanup
+  refuses the parent, unrelated names, outside paths and symlinks.
+- `INTELLIGIT_REMOTE_SERVER_ARCHIVE`: a previously downloaded official server ZIP
+  for the exact client version and commit. Archive traversal and symlink entries
+  are rejected, transport SHA256 and remote product identity are checked, and the
+  seed uses the product data folder below Remote-SSH's configured install base.
+- `INTELLIGIT_REMOTE_VSIX`: a production package to install with the isolated
+  remote server CLI. Requires the server archive above; the exact installed
+  extension version and package transport hash are checked. The client has no
+  `extensionDevelopmentPath` in this mode.
+
+The UI test explicitly pins docked A and independently selects undocked B,
+checking the native repository picker before and after that selection. Branch
+Update, undocked Pull and Merge must change remote B while A remains unchanged.
+It then selects B in the sidebar and verifies another real Pull retains the
+previously merged content. The remote workspace must not exist on the local
+client filesystem. Seeded runs also verify the live server uses the isolated
+data directory. Git operations are driven through the actual UI; SSH is used
+only for fixture preparation, state assertions and cleanup.
+
+On October 15, 2026, the full physical Remote-SSH UI workflow passed with both a
+development payload and an installed production 0.37.3 VSIX, using actual client
+and server 1.132.0 and a compatible Remote-SSH 0.124.0. The installed run had no
+development-path flag and checked all four operation paths. Owned project and
+server-process counts returned to zero; existing projects and the original
+server installation were unchanged.
+
+Earlier automatic-download attempts remained unverified and are not relabeled
+passing. The later successful runs used an exact-build server seed. The fixtures
+use a disposable file-origin Git remote on the SSH machine; this does not claim
+hosted Git authentication, signing or remote performance validation. This private
+host opt-in test remains separate from the required source CI suite.
