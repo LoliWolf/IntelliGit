@@ -617,6 +617,7 @@ describe("WEBVIEW_CONTEXT_IDS: completeness against the real wiring sites", () =
             "src/views/MergeConflictSessionPanel.ts",
             "src/views/DiffViewerPanel.ts",
             "src/views/FileHistoryPanel.ts",
+            "src/views/PartialChangesPanel.ts",
         ];
 
         const wiredIds = wiringFiles.flatMap(extractWiredContextIds);
@@ -638,7 +639,7 @@ describe("WEBVIEW_CONTEXT_IDS: completeness against the real wiring sites", () =
 describe("WEBVIEW_CONTEXT_IDS: type-level guard", () => {
     it("accepts every declared id as a WebviewContextId", () => {
         const ids: readonly WebviewContextId[] = WEBVIEW_CONTEXT_IDS;
-        expect(ids).toHaveLength(10);
-        expect(new Set(ids).size).toBe(10);
+        expect(ids).toHaveLength(11);
+        expect(new Set(ids).size).toBe(11);
     });
 });

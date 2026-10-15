@@ -14,6 +14,7 @@ import type {
     InteractiveRebaseRangeCommit,
     RebaseSubmissionEntry,
 } from "../../git/interactiveRebase/types";
+import type { ChangelistOutbound, ChangelistReply } from "./changelists";
 
 /** A shelf manifest entry carrying the file icon its path resolves to in the active theme. */
 export interface ShelfFileView extends ShelfFileEntry {
@@ -185,6 +186,7 @@ export type ShelfHealthWarning = {
  * filesystem operations.
  */
 export type OutboundMessage =
+    | ChangelistOutbound
     | {
           /** Lifecycle event requesting working-tree, stash, graph, and draft state. */
           type: "ready";
@@ -589,6 +591,7 @@ export type OutboundMessage =
  * data for the current view.
  */
 export type InboundMessage =
+    | ChangelistReply
     | {
           /** Opens the host-validated interactive-rebase dialog for this webview instance only. */
           type: "showRebaseDialog";

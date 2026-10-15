@@ -27,6 +27,20 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe("shelf paths", () => {
+    it("initializes independent repository stores under one missing storage parent concurrently", async () => {
+        const temporary = await temporaryDirectory();
+        const globalStoragePath = path.join(temporary, "shared-storage");
+        const stores = await Promise.all(
+            Array.from({ length: 16 }, async (_, index) => {
+                const repositoryRoot = path.join(temporary, `repository-${index}`);
+                await mkdir(repositoryRoot);
+                return resolveShelfPaths({ repositoryRoot, globalStoragePath });
+            }),
+        );
+        await Promise.all(stores.map((paths) => ensureShelfRoot(paths)));
+        for (const paths of stores) expect((await lstat(paths.root)).isDirectory()).toBe(true);
+    });
+
     it("uses the first 16 SHA-256 hex characters of the normalized real repository root", async () => {
         const temporary = await temporaryDirectory();
         const repositoryRoot = path.join(temporary, "repository");

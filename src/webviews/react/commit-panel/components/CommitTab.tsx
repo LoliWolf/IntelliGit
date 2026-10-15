@@ -8,6 +8,8 @@ import { Toolbar } from "./Toolbar";
 import { ContextMenu } from "../../shared/components/ContextMenu";
 import { useDragResize } from "../hooks/useDragResize";
 import { type CommitTabProps, useCommitTabController } from "./CommitTabController";
+import { useChangelists } from "../hooks/useChangelists";
+import { ChangelistToolbar } from "./ChangelistToolbar";
 
 /** Renders the working-tree commit workflow and delegates its interaction state to a controller. */
 export function CommitTab(props: CommitTabProps): React.ReactElement {
@@ -17,7 +19,12 @@ export function CommitTab(props: CommitTabProps): React.ReactElement {
         onMouseDown: onDragMouseDown,
         onKeyDown: onDragKeyDown,
     } = useDragResize(220, 180, containerRef);
-    const controller = useCommitTabController(props);
+    const workflow = useChangelists(props);
+    const controller = useCommitTabController({
+        ...props,
+        files: workflow.files,
+        checkedPaths: workflow.checkedPaths,
+    });
     return (
         <CommitTabLayout
             bottomHeight={bottomHeight}
@@ -26,6 +33,7 @@ export function CommitTab(props: CommitTabProps): React.ReactElement {
             onDragMouseDown={onDragMouseDown}
             onDragKeyDown={onDragKeyDown}
             props={props}
+            workflow={workflow}
         />
     );
 }
@@ -37,6 +45,7 @@ interface CommitTabLayoutProps {
     onDragMouseDown: React.MouseEventHandler<HTMLDivElement>;
     onDragKeyDown: React.KeyboardEventHandler<HTMLDivElement>;
     props: CommitTabProps;
+    workflow: ReturnType<typeof useChangelists>;
 }
 
 /** Composes the stable commit-tab view from host data and controller callbacks. */
@@ -47,7 +56,11 @@ function CommitTabLayout({
     onDragMouseDown,
     onDragKeyDown,
     props,
+    workflow,
 }: CommitTabLayoutProps): React.ReactElement {
+    const partialFileActions = [...workflow.checkedPaths].some((file) =>
+        workflow.partialPaths.has(file),
+    );
     return (
         <Flex
             ref={containerRef}
@@ -55,9 +68,10 @@ function CommitTabLayout({
             direction="column"
             flex={1}
             overflow="hidden"
-            onContextMenu={controller.onCommitTabContextMenu}
+            onContextMenu={partialFileActions ? undefined : controller.onCommitTabContextMenu}
         >
             <Toolbar
+                disableFileMutations={partialFileActions}
                 onRefresh={controller.handleRefresh}
                 isRefreshing={props.isRefreshing || controller.isRefreshFeedbackActive}
                 groupByDir={props.groupByDir}
@@ -94,24 +108,32 @@ function CommitTabLayout({
                     historyLoaded={props.amendBranchHistoryLoaded}
                 />
             ) : null}
+            <ChangelistToolbar
+                workflow={workflow}
+                disabled={props.wholeIndexOperationInProgress === true}
+            />
+            {workflow.error ? <div role="alert">{workflow.error}</div> : null}
             <Box flex="1 1 auto" overflowY="auto" minH="40px" bg="var(--intelligit-pycharm-panel)">
                 <FileTree
                     repositoryRoot={props.repositoryRoot}
-                    files={props.files}
+                    files={workflow.files}
                     groupByDir={props.groupByDir}
                     showIgnoredFiles={props.showIgnoredFiles}
                     folderIcon={props.folderIcon}
                     folderExpandedIcon={props.folderExpandedIcon}
                     folderIconsByName={props.folderIconsByName}
-                    checkedPaths={props.checkedPaths}
-                    onToggleFile={props.onToggleFile}
-                    onToggleFolder={props.onToggleFolder}
-                    onToggleSection={props.onToggleSection}
-                    isAllChecked={props.isAllChecked}
-                    isSomeChecked={props.isSomeChecked}
+                    checkedPaths={workflow.checkedPaths}
+                    partialPaths={workflow.partialPaths}
+                    onToggleFile={workflow.toggleFile}
+                    onToggleFolder={workflow.toggleFolder}
+                    onToggleSection={workflow.toggleSection}
+                    isAllChecked={workflow.allChecked}
+                    isSomeChecked={workflow.someChecked}
                     onFileClick={controller.handleFileClick}
                     onTrackUnversionedFiles={controller.handleTrackUnversionedFiles}
-                    onShelfFileDragStart={props.onShelfFileDragStart}
+                    onShelfFileDragStart={
+                        partialFileActions ? undefined : props.onShelfFileDragStart
+                    }
                     expandAllSignal={controller.expandAllSignal}
                     collapseAllSignal={controller.collapseAllSignal}
                 />
@@ -129,11 +151,29 @@ function CommitTabLayout({
                     isAmend={props.isAmend}
                     onMessageChange={props.onMessageChange}
                     onAmendChange={props.onAmendChange}
-                    onCommit={props.onCommit}
-                    onPush={props.onPush}
+                    onCommit={() => workflow.commit()}
+                    onPush={() => workflow.commit(true)}
                     onForcePush={props.onForcePush}
-                    canCommit={props.canCommit}
-                    canPush={props.canPush}
+                    canCommit={
+                        !workflow.busy &&
+                        workflow.hasEligibleSelection &&
+                        (workflow.filter === "all"
+                            ? props.canCommit
+                            : !props.isRefreshing &&
+                              !props.wholeIndexOperationInProgress &&
+                              !props.isAmend &&
+                              props.commitMessage.trim().length > 0 &&
+                              workflow.checkedPaths.size > 0)
+                    }
+                    canPush={
+                        props.canPush ||
+                        (!workflow.busy &&
+                            workflow.hasEligibleSelection &&
+                            workflow.filter !== "all" &&
+                            !props.isRefreshing &&
+                            !props.isAmend &&
+                            props.commitMessage.trim().length > 0)
+                    }
                     pushLabel={props.pushLabel}
                     currentBranchAhead={props.currentBranchAhead}
                     currentBranchName={props.currentBranchName}
@@ -142,7 +182,7 @@ function CommitTabLayout({
                     onGenerateMessage={props.onGenerateMessage}
                     onCancelGeneration={props.onCancelGeneration}
                     hasCommits={props.hasCommits}
-                    hasCheckedPaths={props.checkedPaths.size > 0}
+                    hasCheckedPaths={workflow.checkedPaths.size > 0}
                     wholeIndexOperationInProgress={props.wholeIndexOperationInProgress}
                 />
             </Box>

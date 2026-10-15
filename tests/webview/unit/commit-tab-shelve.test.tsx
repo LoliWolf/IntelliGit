@@ -96,10 +96,14 @@ describe("CommitTab shelving", () => {
         click(abortButton);
 
         expect(vscode.postMessage).toHaveBeenNthCalledWith(1, {
-            type: "continueRebase",
+            type: "loadChangelists",
             repositoryRoot: "/repo",
         });
         expect(vscode.postMessage).toHaveBeenNthCalledWith(2, {
+            type: "continueRebase",
+            repositoryRoot: "/repo",
+        });
+        expect(vscode.postMessage).toHaveBeenNthCalledWith(3, {
             type: "abortRebase",
             repositoryRoot: "/repo",
         });

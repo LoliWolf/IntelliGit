@@ -71,6 +71,68 @@ afterEach(() => {
 });
 
 describe("undocked repository selector", () => {
+    it("tags mutation messages with the repository that rendered their callbacks", async () => {
+        vi.doMock("../../../src/webviews/react/shared/vscodeApi", () => ({
+            getVsCodeApi: () => ({ postMessage }),
+        }));
+        const { useUndockedActions } =
+            await import("../../../src/webviews/react/undocked/useUndockedActions");
+        let actions: ReturnType<typeof useUndockedActions> | undefined;
+        let selectRoot: React.Dispatch<React.SetStateAction<string>> | undefined;
+        function Harness(): React.ReactElement {
+            const [root, setRoot] = React.useState("/repo-a");
+            selectRoot = setRoot;
+            actions = useUndockedActions({
+                graphDispatch: vi.fn(),
+                cpDispatch: vi.fn(),
+                loadingMore: { current: false },
+                commitMessage: "",
+                isAmend: false,
+                generation: { status: "idle" },
+                hasCommits: true,
+                wholeIndexOperationInProgress: false,
+                checkedPaths: new Set(),
+                selectedRepositoryRoot: root,
+                shouldPublishBranch: false,
+            });
+            return <div />;
+        }
+        await render(<Harness />);
+        const old = actions!;
+        act(() => selectRoot!("/repo-b"));
+        actions!.handleBranchAction("mergeIntoCurrent", "topic");
+        old.handleBranchAction("updateBranch", "main");
+        expect(postMessage).toHaveBeenNthCalledWith(1, {
+            type: "branchAction",
+            action: "mergeIntoCurrent",
+            branchName: "topic",
+            repositoryRoot: "/repo-b",
+        });
+        expect(postMessage).toHaveBeenNthCalledWith(2, {
+            type: "branchAction",
+            action: "updateBranch",
+            branchName: "main",
+            repositoryRoot: "/repo-a",
+        });
+        for (const [source, repositoryRoot] of [
+            [old, "/repo-a"],
+            [actions!, "/repo-b"],
+        ] as const) {
+            postMessage.mockClear();
+            source.handleWorktreeAction("lock", "/linked");
+            source.handleCommitAction("revertCommit", "a".repeat(40));
+            source.handleCommit();
+            source.handlePush();
+            source.handleForcePush();
+            source.handleFetch();
+            source.handlePull();
+            source.handleSync();
+            expect(postMessage).toHaveBeenCalledTimes(8);
+            for (const [message] of postMessage.mock.calls)
+                expect(message).toMatchObject({ repositoryRoot });
+        }
+    });
+
     it("renders known repositories and emits the selected root", async () => {
         const onSelectRepository = vi.fn();
         const { RepositoryColumn } =

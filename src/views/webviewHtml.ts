@@ -64,6 +64,7 @@ export function buildWebviewShellHtml({
         "webview-filehistory.js",
         "webview-diffviewer.js",
         "webview-mergeeditor.js",
+        "webview-partialchanges.js",
     ].includes(scriptFile)
         ? `    <script nonce="${nonce}" src="${escapeHtmlAttr(String(webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", "webview-shiki.js"))))}"></script>\n`
         : "";

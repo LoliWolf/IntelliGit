@@ -106,6 +106,7 @@ interface TreeFileWiring {
     isCurrent?: boolean;
     /** Current checkbox state when a caller supplies file-check wiring. */
     isChecked?: boolean;
+    isIndeterminate?: boolean;
     /**
      * Set only when this row is one of two sharing a path -- a partially staged file.
      * Which side of the index a row shows is a fact about the LIST, not about the
@@ -155,7 +156,8 @@ interface SharedTreeOptions<F extends TreeRowFile> {
     rowVariant?: "default" | "commit-panel";
 }
 
-interface FileTreeRowsProps<F extends TreeRowFile> extends SharedTreeOptions<F> {
+/** Shared row contracts allow the commit surface to virtualize without duplicating row behavior. */
+export interface FileTreeRowsProps<F extends TreeRowFile> extends SharedTreeOptions<F> {
     entries: TreeEntry<F>[];
 }
 
@@ -501,6 +503,7 @@ function TreeFileCheckbox({
     return (
         <VscCheckbox
             isChecked={wiring.isChecked ?? false}
+            isIndeterminate={wiring.isIndeterminate}
             onChange={() => wiring.onToggleCheck?.(file.path)}
             ariaLabel={file.path}
         />

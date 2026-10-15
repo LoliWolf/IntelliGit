@@ -41,6 +41,7 @@ interface Props {
     rebaseControl?: CommitPanelRebaseControl;
     onContinueRebase: () => void;
     onAbortRebase: () => void;
+    disableFileMutations?: boolean;
 }
 
 /**
@@ -73,6 +74,7 @@ export function Toolbar({
     rebaseControl,
     onContinueRebase,
     onAbortRebase,
+    disableFileMutations = false,
 }: Props): React.ReactElement {
     const [viewMenuPosition, setViewMenuPosition] = useState<{ x: number; y: number } | null>(null);
     const viewMenuItems = useMemo<MenuItem[]>(
@@ -127,6 +129,7 @@ export function Toolbar({
             <ToolbarIconButton
                 label={t("common.rollback")}
                 onClick={onRollback}
+                disabled={disableFileMutations}
                 color={TOOLBAR_ICON_ACCENTS.rollback}
                 icon={<VscDiscard size={16} />}
             />
@@ -150,6 +153,7 @@ export function Toolbar({
             <ToolbarIconButton
                 label={t("common.stashChanges")}
                 onClick={onStash}
+                disabled={disableFileMutations}
                 color={TOOLBAR_ICON_ACCENTS.stash}
                 icon={<VscArchive size={16} />}
             />
@@ -157,6 +161,7 @@ export function Toolbar({
                 <ToolbarIconButton
                     label={t("shelf.action.toolbar")}
                     onClick={onOpenShelfMenu}
+                    disabled={disableFileMutations}
                     color={TOOLBAR_ICON_ACCENTS.shelf}
                     icon={<VscLibrary size={16} />}
                 />

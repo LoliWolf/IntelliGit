@@ -46,6 +46,8 @@ function listWebviewSourceFiles(directory: string): string[] {
  * to be absent from the manifest to go unnoticed.
  */
 const OUTBOUND_UNION_DECLARATIONS = [
+    "src/webviews/protocol/changelists.ts:ChangelistOutbound",
+    "src/webviews/protocol/changelists.ts:PartialEditorOutbound",
     "src/webviews/protocol/commitGraphTypes.ts:CommitGraphOutbound",
     "src/webviews/protocol/commitInfoTypes.ts:CommitInfoOutbound",
     "src/webviews/protocol/commitPanelMessages.ts:OutboundMessage",

@@ -14,6 +14,7 @@ import { buildWebviewShellHtml } from "./webviewHtml";
 import { decorateShelfFiles, shelfFilePaths } from "./shelfIconDecoration";
 import { getErrorMessage } from "../utils/errors";
 import { postWebviewMessage } from "./webviewDelivery";
+import { ChangeWorkflowHost, isChangeWorkflowCommand } from "./ChangeWorkflowHost";
 import { mapWithConcurrency } from "../utils/concurrency";
 import { assertRepoRelativePath } from "../utils/fileOps";
 import { abortMergeWithConfirmation } from "./mergeAbort";
@@ -199,6 +200,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private lastFileCount = 0;
     private repositories: DiscoveredRepository[] = [];
     private readonly runtimes = new Map<string, CommitPanelRepositoryRuntime>();
+    private readonly changeWorkflows = new Map<string, ChangeWorkflowHost>();
     private readonly expandedRepositoryRoots = new Set<string>();
     private readonly runtimeWatchers = new Map<string, vscode.Disposable>();
     private readonly runtimeRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -393,6 +395,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         this.disposeAllRuntimeWatchers();
         this.expandedRepositoryRoots.clear();
         for (const root of this.runtimes.keys()) this.nativeCommitInputBridge.detach(root);
+        for (const workflow of this.changeWorkflows.values()) workflow.dispose();
+        this.changeWorkflows.clear();
         this.runtimes.clear();
         this.setRepositoriesInternal(
             [this.repositoryFromUri(repoRootUri)],
@@ -439,6 +443,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.invalidateRuntime(runtime);
             this.nativeCommitInputBridge.detach(root);
             this.runtimes.delete(root);
+            this.disposeChangeWorkflow(root);
         }
 
         for (const repository of repositories) {
@@ -996,6 +1001,37 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         };
     }
 
+    /** Keeps list metadata and partial snapshots pinned to the addressed repository runtime. */
+    private changeWorkflow(runtime: CommitPanelRepositoryRuntime): ChangeWorkflowHost {
+        const root = runtime.repository.root;
+        const previous = this.changeWorkflows.get(root);
+        if (previous) return previous;
+        const workflow = new ChangeWorkflowHost({
+            root,
+            extensionUri: this.extensionUri,
+            workspaceState: this.workspaceState,
+            gitOps: runtime.gitOps,
+            files: () => runtime.files,
+            post: (message) => this.postToWebview(message),
+            actions: this.actionDepsForRuntime(runtime),
+            runCommit: async (operation) => {
+                const release = this.acquireCommitLeaseForRuntime(runtime);
+                try {
+                    await operation();
+                } finally {
+                    release?.();
+                }
+            },
+        });
+        this.changeWorkflows.set(root, workflow);
+        return workflow;
+    }
+
+    private disposeChangeWorkflow(root: string): void {
+        this.changeWorkflows.get(root)?.dispose();
+        this.changeWorkflows.delete(root);
+    }
+
     /** Runs a correlated stash mutation and posts completion for the repository captured at dispatch. */
     private runStashMutationRequest(
         runtime: CommitPanelRepositoryRuntime | undefined,
@@ -1434,6 +1470,16 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             if (refreshRequestId === runtime.dataRefreshSeq) {
                 runtime.folderIconsByName = folderIconsByName;
                 runtime.files = files;
+                void this.changeWorkflows
+                    .get(runtime.repository.root)
+                    ?.reconcile(files)
+                    .catch((error: unknown) => {
+                        this.postToWebview({
+                            type: "error",
+                            repositoryRoot: runtime.repository.root,
+                            message: getErrorMessage(error),
+                        });
+                    });
                 runtime.stashes = stashes;
                 runtime.selectedStashIndex = selectedStashIndex;
                 runtime.stashFiles = stashFiles;
@@ -1794,6 +1840,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         this.validateKnownRepositoryRoot(msg);
         const activeRuntime = () => this.requireActiveRuntime();
         const scopedRuntime = () => this.runtimeForMessage(msg);
+        if (isChangeWorkflowCommand(msg.type)) {
+            const runtime = scopedRuntime();
+            if (!runtime) throw new Error("No active repository selected.");
+            await this.changeWorkflow(runtime).handle(msg);
+            return;
+        }
         switch (msg.type) {
             case "ready":
                 await this.handleReadyMessage(msg.attempt);
@@ -2425,6 +2477,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
      * Releases theme listeners, icon resources, and event emitters owned by the Changes provider.
      */
     dispose(): void {
+        for (const workflow of this.changeWorkflows.values()) workflow.dispose();
+        this.changeWorkflows.clear();
         this.commitMessageGenerationCoordinator?.dropHost(this.commitMessageGenerationHost);
         this.nativeCommitInputBridge.dispose();
         this.disposeAllRuntimeWatchers();

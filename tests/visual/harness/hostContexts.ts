@@ -135,6 +135,14 @@ export const WEBVIEW_HOST_CONTEXTS: readonly ResolvedHostContext[] = [
         resolvedBackgroundVar: DEFAULT_BACKGROUND_VAR,
         titleDescriptor: { kind: "localized", key: "History: {file}" },
     },
+    {
+        contextId: "partial-changes",
+        scriptFile: "webview-partialchanges.js",
+        styleFiles: ["webview-partialchanges.css"],
+        declaredBackgroundVar: DEFAULT_BACKGROUND_VAR,
+        resolvedBackgroundVar: DEFAULT_BACKGROUND_VAR,
+        titleDescriptor: { kind: "localized", key: "Selected changes: {path}" },
+    },
 ] as const;
 
 /**

@@ -1,4 +1,5 @@
 import type { FrameLocator, Locator, Page } from "@playwright/test";
+import { Workbench } from "./workbench";
 
 /** A marker that appears in exactly one IntelliGit webview document, used to tell the surfaces
  * apart by what they render rather than by where they sit in the DOM. */
@@ -14,23 +15,6 @@ const DEFAULT_REVEAL_TIMEOUT_MS = 30_000;
 
 /** Gap between retries while a surface is still rendering. */
 const REVEAL_POLL_INTERVAL_MS = 250;
-
-/**
- * The activity-bar entry as a whole, rather than the labelled anchor inside it.
- *
- * VS Code renders a view's `badge` as a `<div class="badge">` that is a SIBLING of that anchor and
- * overlaps it, so once IntelliGit reports a changed-file count the badge owns the anchor's centre
- * point. Playwright then refuses to click -- the hit element is neither the target nor a descendant
- * of it -- and retries until the timeout:
- *
- *     <div class="badge" aria-label="IntelliGit - 5 changed files">…</div> intercepts pointer events
- *
- * The badge appears only once the extension has finished counting, so an anchor-targeted click is a
- * race against startup that reads as a dead activity-bar item when it loses. Clicking the item makes
- * the badge a descendant of the target, which both satisfies the check and matches what a user does
- * -- the badge is decoration inside the button, and clicking it has always opened the view.
- */
-const ACTIVITY_BAR_ITEM = ".activitybar .action-item";
 
 /** How many console lines the timeout message may carry. The workbench is chatty, so keeping every
  * message would evict the interesting one long before the failure; the trail keeps errors and
@@ -107,11 +91,9 @@ export class IntelliGitView {
 
     /** Reveals IntelliGit in the sidebar and returns its webview document. */
     public async reveal(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
-        await this.page
-            .locator(ACTIVITY_BAR_ITEM)
-            .filter({ has: this.page.getByLabel("IntelliGit", { exact: true }) })
-            .first()
-            .click();
+        // Window restoration can open the sidebar between an aria-expanded read and a click.
+        // The Show command is idempotent; an activity-bar toggle can close the restored view.
+        await new Workbench(this.page).runCommand("View: Show IntelliGit");
         return this.frameOwning(SIDEBAR_MARKER, timeoutMs);
     }
 
@@ -119,6 +101,11 @@ export class IntelliGitView {
      * first (`IntelliGit: Show Git Log`). */
     public async revealPanel(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
         return this.frameOwning(GRAPH_PANEL_MARKER, timeoutMs);
+    }
+
+    /** Returns the independent repository-scoped workbench after it opens in an editor tab. */
+    public async revealUndocked(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
+        return this.frameOwning('[data-testid="undocked-graph-section"]', timeoutMs);
     }
 
     /** Returns the diff viewer's webview document. The caller triggers it first (for example,
@@ -149,6 +136,17 @@ export class IntelliGitView {
         timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS,
     ): Promise<FrameLocator> {
         return this.frameOwning(".session-root", timeoutMs);
+    }
+
+    /** Resolves the fixed-file selected-changes editor without positional iframe assumptions. */
+    public async revealPartialChanges(
+        filePath?: string,
+        timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS,
+    ): Promise<FrameLocator> {
+        const marker = filePath
+            ? `.partial-changes:has(.partial-toolbar strong[title=${JSON.stringify(filePath)}])`
+            : ".partial-changes";
+        return this.frameOwning(marker, timeoutMs);
     }
 
     /**

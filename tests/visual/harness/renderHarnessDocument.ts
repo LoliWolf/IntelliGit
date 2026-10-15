@@ -109,6 +109,7 @@ export function renderHarnessDocument(input: HarnessDocumentInput): string {
         "webview-filehistory.js",
         "webview-diffviewer.js",
         "webview-mergeeditor.js",
+        "webview-partialchanges.js",
     ].includes(context.scriptFile)
         ? `    <script src="${escapeHtml(assetUrl(input.assetBaseUrl, "webview-shiki.js"))}"></script>\n`
         : "";

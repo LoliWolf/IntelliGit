@@ -618,6 +618,23 @@ describe("CI quality hardening workflows", () => {
         ).toBe(2);
     });
 
+    it("retains POSIX installed-smoke failure traces without making the smoke optional", () => {
+        const workflow = readRepositoryFile(".github/workflows/compatibility.yml");
+        const job = extractJobBlock(workflow, "compatibility");
+        const upload = extractStepBlock(job, "Upload POSIX smoke failure evidence");
+        expect(upload).toContain("if: failure()");
+        expect(upload).toContain("uses: actions/upload-artifact@");
+        expect(upload).toContain("name: package-smoke-${{ matrix.os }}-failure");
+        expect(upload).toContain("path: test-results/");
+        for (const platform of ["Linux", "macOS"]) {
+            const smoke = extractStepBlock(job, `Smoke test the installed package on ${platform}`);
+            expect(smoke).toContain("bun run test:package-smoke");
+            expect(smoke).not.toContain("continue-on-error");
+            expect(smoke).not.toContain("--retries");
+            expect(job.indexOf(upload)).toBeGreaterThan(job.indexOf(smoke));
+        }
+    });
+
     it("keeps the Windows leg off the two costs that were measured, not guessed", () => {
         // Every assertion here guards a change that leaves the workflow GREEN and merely slow --
         // nothing in CI notices a cache that restores nothing, or an OS feature install nobody

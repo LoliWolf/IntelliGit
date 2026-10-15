@@ -397,7 +397,7 @@ describe("undocked recorder doubles", () => {
 });
 
 describe("undocked recorder registry", () => {
-    it("registers exactly the ten recorded contexts", () => {
+    it("registers exactly the eleven recorded contexts", () => {
         const contextIds = new Set(WEBVIEW_FIXTURE_RECORDERS.map((entry) => entry.contextId));
 
         expect(contextIds).toEqual(
@@ -412,6 +412,7 @@ describe("undocked recorder registry", () => {
                 "shelf-conflict-editor",
                 "undocked",
                 "file-history",
+                "partial-changes",
             ]),
         );
     });

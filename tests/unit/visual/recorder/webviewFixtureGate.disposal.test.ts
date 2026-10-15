@@ -25,7 +25,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -46,6 +46,7 @@ import {
     WEBVIEW_FIXTURE_RECORDERS,
     type WebviewFixtureRecorderEntry,
 } from "../../../visual/recorder/webviewFixtureRegistry";
+import { webviewFixtureFilePath } from "../../../visual/recorder/webviewFixtureFile";
 import { removeScratchDirectories } from "../../../helpers/scratchDirectories";
 import { fakeEntry, instrumentedPrepareScenario } from "./webviewFixtureGateTestHelpers";
 
@@ -186,6 +187,66 @@ describe("runWebviewFixtureGate", () => {
             }
         });
     });
+
+    it.each([false, true])(
+        "partitions recordings without losing missing/orphan checks or touching other scenarios (update=%s)",
+        async (update) => {
+            const repoRoot = await mkdtemp(
+                path.join(tmpdir(), "intelligit-webview-gate-partition-"),
+            );
+            const clean = fakeEntry("clean");
+            const dirty = fakeEntry("dirty");
+            const { prepareScenario, calls, preparations } = instrumentedPrepareScenario();
+            try {
+                // Seed real committed bytes, then make the unselected recording and file disagree.
+                await runWebviewFixtureGate({
+                    repoRoot,
+                    registry: [clean, dirty],
+                    update: true,
+                    prepareScenario,
+                });
+                const dirtyPath = webviewFixtureFilePath(repoRoot, dirty.contextId, dirty.scenario);
+                const dirtyBytes = `${await readFile(dirtyPath, "utf8")} `;
+                await writeFile(dirtyPath, dirtyBytes);
+                const orphanPath = webviewFixtureFilePath(
+                    repoRoot,
+                    clean.contextId,
+                    "orphan-scenario",
+                );
+                await writeFile(orphanPath, "{}");
+                calls.length = 0;
+                const neverRecord = vi.fn(async () => {
+                    throw new Error("unselected recorder ran");
+                });
+
+                const findings = await runWebviewFixtureGate({
+                    repoRoot,
+                    registry: [
+                        clean,
+                        { ...dirty, record: neverRecord },
+                        { ...fakeEntry("empty-repo"), record: neverRecord },
+                    ],
+                    recordScenario: "clean",
+                    update,
+                    prepareScenario,
+                });
+
+                expect(calls).toEqual(["clean"]);
+                expect(neverRecord).not.toHaveBeenCalled();
+                expect(findings.map(({ kind, scenario }) => ({ kind, scenario }))).toEqual([
+                    { kind: "missing", scenario: "empty-repo" },
+                    { kind: "orphan", scenario: "orphan-scenario" },
+                ]);
+                expect(await readFile(dirtyPath, "utf8")).toBe(dirtyBytes);
+                for (const prepared of preparations) {
+                    expect(existsSync(prepared.destination)).toBe(false);
+                    expect(existsSync(prepared.home)).toBe(false);
+                }
+            } finally {
+                await removeScratchDirectories(repoRoot);
+            }
+        },
+    );
 
     describe("prepareIntoScratchDestination", () => {
         it("removes the scratch destination it allocated when prepare rejects", async () => {

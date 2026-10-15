@@ -828,6 +828,7 @@ function makeGitOpsMock(repositoryRoot = "/repo") {
         stashDelete: vi.fn(async () => "deleted"),
         stashClear: vi.fn(async () => "cleared"),
         getConflictFilesDetailed: vi.fn(async () => []),
+        getRepositoryRoot: vi.fn(async () => "/repo"),
         abortMerge: vi.fn(async () => undefined),
         getStashFilePatch: vi.fn(async () => "diff --git a b"),
         getStashFileContents: vi.fn(async () => ({ before: "base", after: "stash" })),
@@ -2474,6 +2475,38 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("UndockedViewProvider rejects a stale branch row after selecting another known root", async () => {
+        const { UndockedViewProvider } = await import("../../../src/views/UndockedViewProvider");
+        const gitOps = makeGitOpsMock();
+        const provider = createTestUndockedViewProvider(
+            UndockedViewProvider,
+            { fsPath: "/ext", path: "/ext" } as never,
+            gitOps as never,
+            { fsPath: "/repo", path: "/repo" } as never,
+            makeCredentialStore() as never,
+        );
+        provider.setRepositories(
+            [
+                { root: "/repo", label: "A" },
+                { root: "/repo-b", label: "B" },
+            ],
+            "/repo-b",
+        );
+        const action = vi.fn();
+        provider.onBranchAction(action);
+        const host = provider as unknown as { handleMessage(message: unknown): Promise<void> };
+        await expect(
+            host.handleMessage({
+                type: "branchAction",
+                repositoryRoot: "/repo",
+                action: "mergeIntoCurrent",
+                branchName: "topic",
+            }),
+        ).rejects.toThrow("repository is no longer available");
+        expect(action).not.toHaveBeenCalled();
+        provider.dispose();
+    });
+
     it("UndockedViewProvider handles graph and commit-panel message protocols", async () => {
         const { UndockedViewProvider } = await import("../../../src/views/UndockedViewProvider");
         const gitOps = makeGitOpsMock();
@@ -2602,8 +2635,18 @@ describe("view providers integration", () => {
         await send({ type: "filterText", text: "fix" });
         await send({ type: "filterBranch", branch: "main" });
         await send({ type: "loadMore" });
-        await send({ type: "branchAction", action: "checkout", branchName: "main" });
-        await send({ type: "commitAction", action: "copyRevision", hash: "abc1234" });
+        await send({
+            type: "branchAction",
+            action: "checkout",
+            branchName: "main",
+            repositoryRoot: "/repo",
+        });
+        await send({
+            type: "commitAction",
+            action: "copyRevision",
+            hash: "abc1234",
+            repositoryRoot: "/repo",
+        });
         await send({ type: "openCommitFileDiff", commitHash: "abc1234", filePath: "src/a.ts" });
         await send({ type: "dock" });
         expect(selected).toEqual(["abc1234"]);
@@ -2679,8 +2722,10 @@ describe("view providers integration", () => {
         showWarningMessage.mockResolvedValueOnce("Delete");
         await send({ type: "deleteFile", path: "src/a.ts" });
 
-        expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
-        expect(gitOps.unstageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(selectedStashGitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(selectedStashGitOps.unstageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(gitOps.stageFiles).not.toHaveBeenCalled();
+        expect(gitOps.unstageFiles).not.toHaveBeenCalled();
         expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo");
         expect(selectedCommitGitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
         expect(selectedCommitGitOps.commit).toHaveBeenCalledWith("feat: selected", false, [
@@ -2691,7 +2736,7 @@ describe("view providers integration", () => {
         expect(selectedCommitGitOps.commit).toHaveBeenCalledWith("feat: push", false);
         expect(selectedCommitGitOps.commitAndPush).not.toHaveBeenCalled();
         expect(selectedCommitGitOps.push).toHaveBeenCalled();
-        expect(executeCommand).toHaveBeenCalledWith("intelligit.publishBranch");
+        expect(executeCommand).toHaveBeenCalledWith("intelligit.publishBranch", "/repo");
         expect(postMessageSpy).toHaveBeenCalledWith({
             type: "lastCommitMessage",
             repositoryRoot: "/repo",
@@ -2709,16 +2754,24 @@ describe("view providers integration", () => {
                 },
             ],
         });
-        expect(gitOps.rollbackFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(selectedCommitGitOps.rollbackFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(gitOps.rollbackFiles).not.toHaveBeenCalled();
         expect(executeCommand).toHaveBeenCalledWith("git.openChange", expect.any(Object));
-        expect(gitOps.stashSave).toHaveBeenCalledWith(["src/a.ts"], "work");
-        expect(gitOps.stashPop).toHaveBeenCalledWith(0);
-        expect(gitOps.stashApply).toHaveBeenCalledWith(0);
-        expect(gitOps.applyStashFile).toHaveBeenCalledWith(0, "a".repeat(40), "src/a.ts");
-        expect(gitOps.stashApply).toHaveBeenCalledWith(0, true);
-        expect(gitOps.stashBranch).toHaveBeenCalledWith("feature/unstash", 0);
-        expect(gitOps.stashDelete).toHaveBeenCalledWith(0);
-        expect(gitOps.stashClear).toHaveBeenCalledTimes(1);
+        expect(selectedCommitGitOps.stashSave).toHaveBeenCalledWith(["src/a.ts"], "work");
+        expect(selectedCommitGitOps.stashPop).toHaveBeenCalledWith(0);
+        expect(selectedCommitGitOps.stashApply).toHaveBeenCalledWith(0);
+        expect(selectedCommitGitOps.applyStashFile).toHaveBeenCalledWith(
+            0,
+            "a".repeat(40),
+            "src/a.ts",
+        );
+        expect(selectedCommitGitOps.stashApply).toHaveBeenCalledWith(0, true);
+        expect(selectedCommitGitOps.stashBranch).toHaveBeenCalledWith("feature/unstash", 0);
+        expect(selectedCommitGitOps.stashDelete).toHaveBeenCalledWith(0);
+        expect(selectedCommitGitOps.stashClear).toHaveBeenCalledTimes(1);
+        expect(gitOps.stashSave).not.toHaveBeenCalled();
+        expect(gitOps.stashPop).not.toHaveBeenCalled();
+        expect(gitOps.stashDelete).not.toHaveBeenCalled();
         expect(
             postMessageSpy.mock.calls
                 .map(([message]) => message)
@@ -2750,7 +2803,10 @@ describe("view providers integration", () => {
         await expect(stashSide.right.load(1_000_000)).resolves.toEqual(
             expect.objectContaining({ status: "loaded" }),
         );
-        expect(gitOps.getFileContentAtRef).toHaveBeenCalledWith("src/a.ts", "stashhash");
+        expect(selectedCommitGitOps.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/a.ts",
+            "stashhash",
+        );
         expect(executeCommand).not.toHaveBeenCalledWith(
             "vscode.diff",
             expect.objectContaining({
@@ -2766,7 +2822,11 @@ describe("view providers integration", () => {
             "{path} (Local File <-> Stash {reference})",
             { preview: true },
         );
-        expect(deleteFileWithFallback).toHaveBeenCalledWith(gitOps, expect.any(Object), "src/a.ts");
+        expect(deleteFileWithFallback).toHaveBeenCalledWith(
+            selectedCommitGitOps,
+            expect.any(Object),
+            "src/a.ts",
+        );
         expect(workingTreeEvents.length).toBeGreaterThanOrEqual(9);
         expect(fileCounts.length).toBeGreaterThan(0);
     });
@@ -5108,11 +5168,18 @@ describe("view providers integration", () => {
             entries,
         });
         await undockedMessages.handleMessage({ type: "cancelRebaseDialog", requestId: "undocked" });
-        await undockedMessages.handleMessage({
-            type: "continueRebase",
-            repositoryRoot: "/forged",
-        });
-        await undockedMessages.handleMessage({ type: "abortRebase", repositoryRoot: "/stale" });
+        await expect(
+            undockedMessages.handleMessage({
+                type: "continueRebase",
+                repositoryRoot: "/forged",
+            }),
+        ).rejects.toThrow("repository");
+        await expect(
+            undockedMessages.handleMessage({ type: "abortRebase", repositoryRoot: "/stale" }),
+        ).rejects.toThrow("repository");
+        expect(undockedRebaseControl).not.toHaveBeenCalled();
+        await undockedMessages.handleMessage({ type: "continueRebase", repositoryRoot: "/repo" });
+        await undockedMessages.handleMessage({ type: "abortRebase", repositoryRoot: "/repo" });
         await expect(
             undockedMessages.handleMessage({
                 type: "startInteractiveRebase",
@@ -7437,7 +7504,9 @@ describe("view providers integration", () => {
 
         await webview.send({ type: "stashPop", index: 0 });
 
-        expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession");
+        expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession", {
+            repositoryRoot: "/repo",
+        });
         expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
         provider.dispose();
     });
@@ -7451,7 +7520,9 @@ describe("view providers integration", () => {
 
         await webview.send({ type: "stashApply", index: 0 });
 
-        expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession");
+        expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession", {
+            repositoryRoot: "/repo",
+        });
         expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
         provider.dispose();
     });

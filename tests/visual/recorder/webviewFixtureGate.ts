@@ -349,6 +349,7 @@ async function reconcileRegistryEntry(
     repoRoot: string,
     update: boolean,
     scenarios: ScenarioWorkspaceCache,
+    shouldRecord: boolean,
 ): Promise<WebviewFixtureGateFinding | undefined> {
     const committedPath = webviewFixtureFilePath(repoRoot, entry.contextId, entry.scenario);
     let committedBytes: string | undefined;
@@ -362,7 +363,7 @@ async function reconcileRegistryEntry(
     }
 
     if (committedBytes === undefined) {
-        if (!update) {
+        if (!update || !shouldRecord) {
             return {
                 kind: "missing",
                 contextId: entry.contextId,
@@ -382,6 +383,8 @@ async function reconcileRegistryEntry(
         );
         return undefined;
     }
+
+    if (!shouldRecord) return undefined;
 
     const workspace = await scenarios.get(entry.scenario);
     const freshBytes = serializeWebviewFixture(await entry.record(workspace));
@@ -435,6 +438,10 @@ type ScenarioWorkspaceCache = ReturnType<typeof scenarioWorkspaceCache>;
  * recorder that itself throws is not a finding, though: it propagates out of this call, same as
  * before this phase's scenario-aware rework.
  *
+ * `recordScenario` partitions fresh recordings across test cases with independent scenario budgets.
+ * Missing-file and orphan checks still cover the complete registry. Update mode only repairs the
+ * selected scenario; absent files in other scenarios remain findings until their partition runs.
+ *
  * With `update`, the two registry-to-disk cases are REPAIRED instead of reported: the fresh
  * recording is written to the committed path (creating its directory if needed) and no finding is
  * raised. That is this gate's regeneration path -- the one its own "missing" message names -- and
@@ -450,15 +457,28 @@ export async function runWebviewFixtureGate(options: {
     readonly repoRoot: string;
     readonly registry: readonly WebviewFixtureRecorderEntry[];
     readonly update?: boolean;
+    readonly recordScenario?: RepositoryScenarioId;
     readonly prepareScenario?: (id: RepositoryScenarioId) => Promise<ScenarioWorkspace>;
 }): Promise<WebviewFixtureGateFinding[]> {
-    const { repoRoot, registry, update = false, prepareScenario = prepareRealScenario } = options;
+    const {
+        repoRoot,
+        registry,
+        update = false,
+        recordScenario,
+        prepareScenario = prepareRealScenario,
+    } = options;
     const scenarios = scenarioWorkspaceCache(prepareScenario);
 
     try {
         const registryFindings: WebviewFixtureGateFinding[] = [];
         for (const entry of registry) {
-            const finding = await reconcileRegistryEntry(entry, repoRoot, update, scenarios);
+            const finding = await reconcileRegistryEntry(
+                entry,
+                repoRoot,
+                update,
+                scenarios,
+                recordScenario === undefined || entry.scenario === recordScenario,
+            );
             if (finding !== undefined) {
                 registryFindings.push(finding);
             }

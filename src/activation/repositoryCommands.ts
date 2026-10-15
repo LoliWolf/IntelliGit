@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import { createBranchCommands } from "../commands/branchCommands";
+import { createBranchCommands, type BranchCommandEntry } from "../commands/branchCommands";
 import {
     BRANCH_COMMAND_FENCE_DECISIONS,
     rejectWhenOperationInProgress,
@@ -42,7 +42,7 @@ import {
     viewGitHubFileFromContext,
     viewGitHubPullRequestsFromContext,
 } from "../commands/githubContextCommands";
-import type { WorktreeService } from "../services/worktreeService";
+import { WorktreeService } from "../services/worktreeService";
 import {
     applySelectedCommitFileChange,
     compareCommitInfoFileWithLocal,
@@ -87,6 +87,7 @@ interface RepositoryCommandsDeps {
     setActiveRepository: (repository: DiscoveredRepository) => Promise<void>;
     clearSelection: (options?: { loading?: boolean }) => void;
     refreshActiveRepository: () => Promise<void>;
+    refreshRepository?: (repositoryRoot: string) => Promise<void>;
     refreshService: () => RefreshService;
     showUndockedGitLog: (options?: { deferDataLoad?: boolean }) => Promise<void>;
     pickUndockTargetAndOpen: () => Promise<void>;
@@ -120,6 +121,64 @@ const isWorktreeContext = (value: unknown): value is GitWorktree => {
         !!value && typeof value === "object" && "path" in value && typeof value.path === "string"
     );
 };
+
+/** Captures a host-known repository without falling back after an explicit invalid request. */
+function captureRepositoryRoot(deps: RepositoryCommandsDeps, value?: unknown): string {
+    const root = value === undefined ? deps.getRepoRoot() : value;
+    if (typeof root !== "string" || !root || !deps.isKnownRepositoryRoot(root)) {
+        throw new Error(
+            vscode.l10n.t(
+                "The requested repository is no longer available. Select it again before running branch actions.",
+            ),
+        );
+    }
+    return root;
+}
+
+/** Native row contexts may address a repository independently of the active graph. */
+function captureContextRepositoryRoot(deps: RepositoryCommandsDeps, context: unknown): string {
+    const requested =
+        context && typeof context === "object" && "repositoryRoot" in context
+            ? context.repositoryRoot
+            : undefined;
+    return captureRepositoryRoot(deps, requested);
+}
+
+/** Publishes through root-stable services and fresh branch metadata across credential prompts. */
+async function publishRepository(deps: RepositoryCommandsDeps, root: string): Promise<void> {
+    const gitOps = deps.gitOps.deriveFor(root);
+    if (!(await gitOps.hasAnyCommits())) {
+        showTimedWarningMessage(vscode.l10n.t("Create a commit before publishing this branch."));
+        return;
+    }
+    const currentBranch = (await gitOps.getBranches()).find(
+        (branch) => branch.isCurrent && !branch.isRemote,
+    );
+    if (!currentBranch) {
+        vscode.window.showErrorMessage(vscode.l10n.t("No current branch found."));
+        return;
+    }
+    await runPublishBranchFlow(gitOps, currentBranch.name, root, deps.context.secrets);
+}
+
+/** Keeps a worktree service and its refresh bound to one command, including confirmation waits. */
+async function withCapturedWorktree(
+    deps: RepositoryCommandsDeps,
+    value: unknown,
+    operation: (service: WorktreeService) => Promise<void | false>,
+): Promise<void> {
+    const root = captureContextRepositoryRoot(deps, value);
+    const service = new WorktreeService(deps.executor.deriveFor(root), () => root);
+    try {
+        if ((await operation(service)) === false) return;
+        if (deps.refreshRepository) await deps.refreshRepository(root);
+        else if (areSameRepositoryRoot(root, deps.getRepoRoot()))
+            await deps.refreshActiveRepository();
+        else await deps.refreshService().refreshCommitPanels();
+    } finally {
+        service.dispose();
+    }
+}
 
 /** Extracts merge-conflict file paths only from known VS Code command payload shapes. */
 const resolveConflictPath = (ctx: unknown): string | null =>
@@ -186,7 +245,6 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         gitOps,
         getRepoRoot,
         setRepositories,
-        getCurrentBranches,
         setActiveRepository,
         clearSelection,
         refreshActiveRepository,
@@ -196,16 +254,16 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         refreshService,
     } = deps;
     const runGraphGitOperation = async (operation: CommitPanelGitOperation): Promise<void> => {
-        const repoRoot = getRepoRoot();
-        const operationGitOps = operation === "pull" ? gitOps.deriveFor(repoRoot) : gitOps;
+        const repoRoot = captureRepositoryRoot(deps);
+        const operationGitOps = gitOps.deriveFor(repoRoot);
         await runGitOperationFromPanel(
             {
                 gitOps: operationGitOps,
                 refreshData: async () => {
-                    if (operation === "pull" && !areSameRepositoryRoot(repoRoot, getRepoRoot()))
-                        return;
+                    if (!areSameRepositoryRoot(repoRoot, getRepoRoot())) return;
                     await refreshActiveRepository();
                 },
+                publishBranch: () => publishRepository(deps, repoRoot),
                 openConflictSession: async () =>
                     deps.openConflictSessionForRepository(operationGitOps, repoRoot, {}),
                 fireWorkingTreeChanged: () => undefined,
@@ -310,33 +368,22 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         vscode.commands.registerCommand("intelligit.graph.sync.color", async () => {
             await runGraphGitOperation("sync");
         }),
-        vscode.commands.registerCommand("intelligit.publishBranch", async () => {
-            const hasCommits = await gitOps.hasAnyCommits();
-            if (!hasCommits) {
-                showTimedWarningMessage(
-                    vscode.l10n.t("Create a commit before publishing this branch."),
-                );
-                return;
-            }
-            const currentBranch = getCurrentBranches().find((b) => b.isCurrent);
-            if (!currentBranch) {
-                vscode.window.showErrorMessage(vscode.l10n.t("No current branch found."));
-                return;
-            }
-            await runPublishBranchFlow(gitOps, currentBranch.name, getRepoRoot(), context.secrets);
+        vscode.commands.registerCommand("intelligit.publishBranch", async (root?: unknown) => {
+            await publishRepository(deps, captureRepositoryRoot(deps, root));
         }),
         vscode.commands.registerCommand("intelligit.worktree.delete", async (ctx: unknown) => {
             if (!isWorktreeContext(ctx)) return;
             try {
-                const removed = await runWithNotificationProgress(
-                    vscode.l10n.t("Deleting worktree {path}...", { path: ctx.path }),
-                    () => deps.worktreeService.removeWorktree(ctx.path),
-                );
-                if (!removed) return;
-                showTimedInformationMessage(
-                    vscode.l10n.t("Deleted worktree {path}", { path: ctx.path }),
-                );
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    const removed = await runWithNotificationProgress(
+                        vscode.l10n.t("Deleting worktree {path}...", { path: ctx.path }),
+                        () => service.removeWorktree(ctx.path),
+                    );
+                    if (!removed) return false;
+                    showTimedInformationMessage(
+                        vscode.l10n.t("Deleted worktree {path}", { path: ctx.path }),
+                    );
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Delete worktree failed: {message}", {
@@ -347,19 +394,20 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         }),
         vscode.commands.registerCommand("intelligit.worktree.lock", async (ctx: unknown) => {
             if (!isWorktreeContext(ctx)) return;
-            const reason = await vscode.window.showInputBox({
-                prompt: vscode.l10n.t("Lock reason (optional)"),
-            });
-            if (reason === undefined) return;
             try {
-                await runWithNotificationProgress(
-                    vscode.l10n.t("Locking worktree {path}...", { path: ctx.path }),
-                    () => deps.worktreeService.lockWorktree(ctx.path, reason.trim() || undefined),
-                );
-                showTimedInformationMessage(
-                    vscode.l10n.t("Locked worktree {path}", { path: ctx.path }),
-                );
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    const reason = await vscode.window.showInputBox({
+                        prompt: vscode.l10n.t("Lock reason (optional)"),
+                    });
+                    if (reason === undefined) return false;
+                    await runWithNotificationProgress(
+                        vscode.l10n.t("Locking worktree {path}...", { path: ctx.path }),
+                        () => service.lockWorktree(ctx.path, reason.trim() || undefined),
+                    );
+                    showTimedInformationMessage(
+                        vscode.l10n.t("Locked worktree {path}", { path: ctx.path }),
+                    );
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Worktree operation failed: {message}", {
@@ -371,11 +419,12 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         vscode.commands.registerCommand("intelligit.worktree.unlock", async (ctx: unknown) => {
             if (!isWorktreeContext(ctx)) return;
             try {
-                await deps.worktreeService.unlockWorktree(ctx.path);
-                showTimedInformationMessage(
-                    vscode.l10n.t("Unlocked worktree {path}", { path: ctx.path }),
-                );
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    await service.unlockWorktree(ctx.path);
+                    showTimedInformationMessage(
+                        vscode.l10n.t("Unlocked worktree {path}", { path: ctx.path }),
+                    );
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Worktree operation failed: {message}", {
@@ -386,24 +435,25 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
         }),
         vscode.commands.registerCommand("intelligit.worktree.move", async (ctx: unknown) => {
             if (!isWorktreeContext(ctx)) return;
-            const picked = await vscode.window.showOpenDialog({
-                title: vscode.l10n.t("Select New Worktree Location"),
-                openLabel: vscode.l10n.t("Move Worktree"),
-                canSelectFiles: false,
-                canSelectFolders: true,
-                canSelectMany: false,
-            });
-            const newPath = picked?.[0]?.fsPath;
-            if (!newPath) return;
             try {
-                await runWithNotificationProgress(
-                    vscode.l10n.t("Moving worktree {path}...", { path: ctx.path }),
-                    () => deps.worktreeService.moveWorktree(ctx.path, newPath),
-                );
-                showTimedInformationMessage(
-                    vscode.l10n.t("Moved worktree {path}", { path: newPath }),
-                );
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    const picked = await vscode.window.showOpenDialog({
+                        title: vscode.l10n.t("Select New Worktree Location"),
+                        openLabel: vscode.l10n.t("Move Worktree"),
+                        canSelectFiles: false,
+                        canSelectFolders: true,
+                        canSelectMany: false,
+                    });
+                    const newPath = picked?.[0]?.fsPath;
+                    if (!newPath) return false;
+                    await runWithNotificationProgress(
+                        vscode.l10n.t("Moving worktree {path}...", { path: ctx.path }),
+                        () => service.moveWorktree(ctx.path, newPath),
+                    );
+                    showTimedInformationMessage(
+                        vscode.l10n.t("Moved worktree {path}", { path: newPath }),
+                    );
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Worktree operation failed: {message}", {
@@ -412,11 +462,12 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
                 );
             }
         }),
-        vscode.commands.registerCommand("intelligit.worktree.prune", async () => {
+        vscode.commands.registerCommand("intelligit.worktree.prune", async (ctx?: unknown) => {
             try {
-                await deps.worktreeService.pruneWorktrees();
-                showTimedInformationMessage(vscode.l10n.t("Pruned worktrees."));
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    await service.pruneWorktrees();
+                    showTimedInformationMessage(vscode.l10n.t("Pruned worktrees."));
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Worktree operation failed: {message}", {
@@ -425,11 +476,12 @@ function registerWindowAndRepositoryCommands(deps: RepositoryCommandsDeps): void
                 );
             }
         }),
-        vscode.commands.registerCommand("intelligit.worktree.repair", async () => {
+        vscode.commands.registerCommand("intelligit.worktree.repair", async (ctx?: unknown) => {
             try {
-                await deps.worktreeService.repairWorktrees();
-                showTimedInformationMessage(vscode.l10n.t("Repaired worktrees."));
-                await vscode.commands.executeCommand("intelligit.refresh");
+                await withCapturedWorktree(deps, ctx, async (service) => {
+                    await service.repairWorktrees();
+                    showTimedInformationMessage(vscode.l10n.t("Repaired worktrees."));
+                });
             } catch (err) {
                 vscode.window.showErrorMessage(
                     vscode.l10n.t("Worktree operation failed: {message}", {
@@ -584,11 +636,15 @@ async function acceptConflictSide(
                       vscode.l10n.t("Accept theirs failed: {message}", { message }),
               };
     try {
+        const root = captureContextRepositoryRoot(deps, ctx);
+        const gitOps = deps.gitOps.deriveFor(root);
         await runWithNotificationProgress(actionText.progress, async () => {
-            await deps.gitOps.acceptConflictSide(filePath, side);
+            await gitOps.acceptConflictSide(filePath, side);
         });
         showTimedInformationMessage(actionText.success);
-        await deps.refreshService().refreshConflictUi();
+        if (areSameRepositoryRoot(root, deps.getRepoRoot()))
+            await deps.refreshService().refreshConflictUi();
+        else await deps.refreshRepository?.(root);
     } catch (error) {
         const message = getErrorMessage(error);
         vscode.window.showErrorMessage(actionText.failure(message));
@@ -617,50 +673,163 @@ function registerBranchCommands(deps: RepositoryCommandsDeps): void {
     for (const cmd of branchCommands) {
         deps.context.subscriptions.push(
             vscode.commands.registerCommand(cmd.id, async (item: unknown) => {
-                // Update may wait on the fence and consent. Capture its complete ownership
-                // synchronously; rebuilding only this dispatch leaves other branch actions intact.
-                const repoRoot = deps.getRepoRoot();
-                const updateGitOps =
-                    cmd.id === "intelligit.updateBranch"
-                        ? deps.gitOps.deriveFor(repoRoot)
+                // Capture ownership before either an operation fence or a prompt can yield.
+                const explicitRoot =
+                    item && typeof item === "object" && "repositoryRoot" in item
+                        ? item.repositoryRoot
                         : undefined;
+                const hasExplicitRoot =
+                    !!item && typeof item === "object" && "repositoryRoot" in item;
+                if (
+                    hasExplicitRoot &&
+                    (typeof explicitRoot !== "string" ||
+                        !explicitRoot ||
+                        !deps.isKnownRepositoryRoot(explicitRoot))
+                ) {
+                    throw new Error(
+                        vscode.l10n.t(
+                            "The requested repository is no longer available. Select it again before running branch actions.",
+                        ),
+                    );
+                }
+                if (hasExplicitRoot)
+                    return runScopedBranchCommand(deps, cmd.id, explicitRoot as string, item);
+                const repoRoot = captureRepositoryRoot(deps);
+                const executor = deps.executor.deriveFor(repoRoot);
+                const operationGitOps = deps.gitOps.deriveFor(repoRoot);
                 const currentBranch = deps.getCurrentBranchName();
                 const branches = deps.getCurrentBranches();
-                const updateCommand = updateGitOps
-                    ? createBranchCommands({
-                          executor: deps.executor.deriveFor(repoRoot),
-                          gitOps: updateGitOps,
-                          getCurrentBranchName: () => currentBranch,
-                          getCurrentBranches: () => branches,
-                          createWorktree: (opts) =>
-                              deps.worktreeService.createWorktree(opts).then(() => undefined),
-                          openConflictSession: (labels = {}) =>
-                              deps.openConflictSessionForRepository(updateGitOps, repoRoot, labels),
-                          refreshConflictUi: async () => {
-                              if (areSameRepositoryRoot(repoRoot, deps.getRepoRoot()))
-                                  await deps.refreshService().refreshConflictUi();
-                          },
-                          refreshRepository: async () => {
-                              if (areSameRepositoryRoot(repoRoot, deps.getRepoRoot()))
-                                  await deps.refreshActiveRepository();
-                          },
-                      }).find((entry) => entry.id === cmd.id)
-                    : undefined;
-                if (
-                    BRANCH_COMMAND_FENCE_DECISIONS[cmd.id] !== false &&
-                    (await rejectWhenOperationInProgress(updateGitOps ?? deps.gitOps))
-                )
-                    return;
-
-                const validated =
-                    item &&
-                    typeof item === "object" &&
-                    ("branch" in item || "branches" in item || "branchNames" in item)
-                        ? (item as { branch?: Branch; branches?: Branch[]; branchNames?: string[] })
-                        : { branch: undefined };
-                return (updateCommand ?? cmd).handler(validated);
+                const worktrees = new WorktreeService(executor, () => repoRoot);
+                try {
+                    const captured = createBranchCommands({
+                        executor,
+                        gitOps: operationGitOps,
+                        getCurrentBranchName: () => currentBranch,
+                        getCurrentBranches: () => branches,
+                        createWorktree: (opts) =>
+                            worktrees.createWorktree(opts).then(() => undefined),
+                        openConflictSession: (labels = {}) =>
+                            deps.openConflictSessionForRepository(
+                                operationGitOps,
+                                repoRoot,
+                                labels,
+                            ),
+                        refreshConflictUi: async () => {
+                            if (areSameRepositoryRoot(repoRoot, deps.getRepoRoot()))
+                                await deps.refreshService().refreshConflictUi();
+                        },
+                        refreshRepository: async () => {
+                            if (deps.refreshRepository) await deps.refreshRepository(repoRoot);
+                            else if (areSameRepositoryRoot(repoRoot, deps.getRepoRoot()))
+                                await deps.refreshActiveRepository();
+                            else await deps.refreshService().refreshCommitPanels();
+                        },
+                        publishBranch: () => publishRepository(deps, repoRoot),
+                    }).find((entry) => entry.id === cmd.id);
+                    if (
+                        BRANCH_COMMAND_FENCE_DECISIONS[cmd.id] !== false &&
+                        (await rejectWhenOperationInProgress(operationGitOps))
+                    )
+                        return;
+                    if (!captured) throw new Error(`Missing captured branch command: ${cmd.id}`);
+                    const validated =
+                        item &&
+                        typeof item === "object" &&
+                        ("branch" in item || "branches" in item || "branchNames" in item)
+                            ? (item as {
+                                  branch?: Branch;
+                                  branches?: Branch[];
+                                  branchNames?: string[];
+                              })
+                            : { branch: undefined };
+                    return await captured.handler(validated);
+                } finally {
+                    worktrees.dispose();
+                }
             }),
         );
+    }
+}
+
+/** Resolves the originating panel's trusted root before any prompt, gate or Git mutation. */
+async function runScopedBranchCommand(
+    deps: RepositoryCommandsDeps,
+    commandId: string,
+    repositoryRoot: string,
+    item: object,
+): Promise<void> {
+    const executor = deps.executor.deriveFor(repositoryRoot);
+    const gitOps = deps.gitOps.deriveFor(repositoryRoot);
+    const worktrees = new WorktreeService(executor, () => repositoryRoot);
+    try {
+        if (
+            BRANCH_COMMAND_FENCE_DECISIONS[commandId] !== false &&
+            (await rejectWhenOperationInProgress(gitOps))
+        )
+            return;
+        const canUseUndecoratedBranches =
+            commandId === "intelligit.mergeIntoCurrent" || commandId === "intelligit.updateBranch";
+        const [branches, hasWorktreeMetadata] = await Promise.all([
+            gitOps.getBranches(),
+            worktrees.listWorktrees().then(
+                () => true,
+                (error: unknown) => {
+                    if (!canUseUndecoratedBranches) throw error;
+                    return false;
+                },
+            ),
+        ]);
+        const currentBranches = hasWorktreeMetadata
+            ? worktrees.decorateBranches(branches)
+            : branches;
+        const branchesByName = new Map(currentBranches.map((branch) => [branch.name, branch]));
+        const payload = item as {
+            branch?: Branch;
+            branches?: Array<Branch | string>;
+            branchNames?: string[];
+        };
+        const resolveBranch = (value: Branch | string): Branch => {
+            const name = typeof value === "string" ? value : value?.name;
+            const branch = branchesByName.get(name);
+            if (!branch)
+                throw new Error(
+                    vscode.l10n.t(
+                        "The selected branch is no longer available. Refresh the repository and try again.",
+                    ),
+                );
+            return branch;
+        };
+        const validated = {
+            ...(payload.branch ? { branch: resolveBranch(payload.branch) } : {}),
+            ...(payload.branches ? { branches: payload.branches.map(resolveBranch) } : {}),
+            ...(payload.branchNames
+                ? { branchNames: payload.branchNames.map((name) => resolveBranch(name).name) }
+                : {}),
+        };
+        const refresh = async (): Promise<void> => {
+            if (deps.refreshRepository) await deps.refreshRepository(repositoryRoot);
+            else if (areSameRepositoryRoot(repositoryRoot, deps.getRepoRoot()))
+                await deps.refreshActiveRepository();
+            else await deps.refreshService().refreshCommitPanels();
+        };
+        const commands: BranchCommandEntry[] = createBranchCommands({
+            executor,
+            gitOps,
+            getCurrentBranchName: () => currentBranches.find((branch) => branch.isCurrent)?.name,
+            getCurrentBranches: () => currentBranches,
+            createWorktree: (options) => worktrees.createWorktree(options).then(() => undefined),
+            openConflictSession: (labels = {}) =>
+                deps.openConflictSessionForRepository(gitOps, repositoryRoot, labels),
+            refreshConflictUi: async () => {
+                if (areSameRepositoryRoot(repositoryRoot, deps.getRepoRoot()))
+                    await deps.refreshService().refreshConflictUi();
+            },
+            refreshRepository: refresh,
+            publishBranch: () => publishRepository(deps, repositoryRoot),
+        });
+        await commands.find((command) => command.id === commandId)?.handler(validated);
+    } finally {
+        worktrees.dispose();
     }
 }
 
@@ -769,22 +938,39 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
         vscode.commands.registerCommand(
             "intelligit.commitFileCompareWithLocal",
             async (ctx: unknown) => {
-                await compareCommitInfoFileWithLocal(ctx, getRepoRoot(), gitOps);
+                const root = captureContextRepositoryRoot(deps, ctx);
+                await compareCommitInfoFileWithLocal(ctx, root, gitOps.deriveFor(root));
             },
         ),
         vscode.commands.registerCommand(
             "intelligit.commitFileCherryPickChange",
             async (ctx: unknown) => {
-                await applySelectedCommitFileChange(ctx, "cherry-pick", executor, () =>
-                    refreshService().refreshConflictUi(),
+                const root = captureContextRepositoryRoot(deps, ctx);
+                await applySelectedCommitFileChange(
+                    ctx,
+                    "cherry-pick",
+                    executor.deriveFor(root),
+                    async () => {
+                        if (areSameRepositoryRoot(root, getRepoRoot()))
+                            await refreshService().refreshConflictUi();
+                        else await deps.refreshRepository?.(root);
+                    },
                 );
             },
         ),
         vscode.commands.registerCommand(
             "intelligit.commitFileRevertChange",
             async (ctx: unknown) => {
-                await applySelectedCommitFileChange(ctx, "revert", executor, () =>
-                    refreshService().refreshConflictUi(),
+                const root = captureContextRepositoryRoot(deps, ctx);
+                await applySelectedCommitFileChange(
+                    ctx,
+                    "revert",
+                    executor.deriveFor(root),
+                    async () => {
+                        if (areSameRepositoryRoot(root, getRepoRoot()))
+                            await refreshService().refreshConflictUi();
+                        else await deps.refreshRepository?.(root);
+                    },
                 );
             },
         ),
@@ -1011,6 +1197,11 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
                 return;
             }
             try {
+                const root = captureRepositoryRoot(
+                    deps,
+                    "repositoryRoot" in ctx ? ctx.repositoryRoot : undefined,
+                );
+                const scopedGitOps = gitOps.deriveFor(root);
                 const safePath = assertRepoRelativePath(ctx.filePath);
                 const rollbackAction = vscode.l10n.t("Rollback");
                 const confirm = await vscode.window.showWarningMessage(
@@ -1019,7 +1210,7 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
                     rollbackAction,
                 );
                 if (confirm !== rollbackAction) return;
-                await gitOps.rollbackFiles([safePath]);
+                await scopedGitOps.rollbackFiles([safePath]);
                 showTimedInformationMessage(vscode.l10n.t("Changes rolled back."));
             } catch (error) {
                 const message = getErrorMessage(error);
@@ -1033,19 +1224,20 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
         }),
         vscode.commands.registerCommand(
             "intelligit.fileJumpToSource",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repositoryRoot?: unknown }) => {
                 if (!ctx?.filePath) return;
-                const uri = vscode.Uri.file(
-                    path.join(getRepoRoot(), assertRepoRelativePath(ctx.filePath)),
-                );
+                const root = captureRepositoryRoot(deps, ctx.repositoryRoot);
+                const uri = vscode.Uri.file(path.join(root, assertRepoRelativePath(ctx.filePath)));
                 await vscode.window.showTextDocument(uri);
             },
         ),
         vscode.commands.registerCommand(
             "intelligit.fileDelete",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repositoryRoot?: unknown }) => {
                 if (!ctx?.filePath) return;
                 try {
+                    const root = captureRepositoryRoot(deps, ctx.repositoryRoot);
+                    const scopedGitOps = gitOps.deriveFor(root);
                     const safePath = assertRepoRelativePath(ctx.filePath);
                     const deleteAction = vscode.l10n.t("Delete");
                     const confirm = await vscode.window.showWarningMessage(
@@ -1056,8 +1248,8 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
                     if (confirm !== deleteAction) return;
 
                     const deleted = await deleteFileWithFallback(
-                        gitOps,
-                        vscode.Uri.file(getRepoRoot()),
+                        scopedGitOps,
+                        vscode.Uri.file(root),
                         safePath,
                     );
                     if (deleted) {
@@ -1080,11 +1272,13 @@ function registerCommitFileCommands(deps: RepositoryCommandsDeps): void {
         ),
         vscode.commands.registerCommand(
             "intelligit.fileShelve",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repositoryRoot?: unknown }) => {
                 if (!ctx?.filePath) return;
                 try {
+                    const root = captureRepositoryRoot(deps, ctx.repositoryRoot);
+                    const scopedGitOps = gitOps.deriveFor(root);
                     const safePath = assertRepoRelativePath(ctx.filePath);
-                    await gitOps.stashSave([safePath]);
+                    await scopedGitOps.stashSave([safePath]);
                     showTimedInformationMessage(
                         vscode.l10n.t("Stashed {path}.", { path: safePath }),
                     );

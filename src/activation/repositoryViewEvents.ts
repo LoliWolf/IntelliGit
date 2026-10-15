@@ -213,7 +213,15 @@ export function registerRepositoryViewEvents(
     }): void => {
         const branch = getCurrentBranches().find((b) => b.name === branchName);
         if (!branch) return;
-        void vscode.commands.executeCommand(`intelligit.${action}`, { branch });
+        void vscode.commands
+            .executeCommand(`intelligit.${action}`, { branch, repositoryRoot: getRepoRoot() })
+            .then(undefined, (error) => {
+                vscode.window.showErrorMessage(
+                    vscode.l10n.t("Branch action failed: {message}", {
+                        message: getErrorMessage(error),
+                    }),
+                );
+            });
     };
 
     /**
@@ -237,7 +245,18 @@ export function registerRepositoryViewEvents(
             );
             return;
         }
-        void vscode.commands.executeCommand("intelligit.deleteBranches", { branches: selected });
+        void vscode.commands
+            .executeCommand("intelligit.deleteBranches", {
+                branches: selected,
+                repositoryRoot: getRepoRoot(),
+            })
+            .then(undefined, (error) => {
+                vscode.window.showErrorMessage(
+                    vscode.l10n.t("Branch action failed: {message}", {
+                        message: getErrorMessage(error),
+                    }),
+                );
+            });
     };
 
     /** Forwards only worktree actions whose path came from the latest trusted host snapshot. */
@@ -259,7 +278,10 @@ export function registerRepositoryViewEvents(
             });
             return;
         }
-        void vscode.commands.executeCommand(`intelligit.worktree.${action}`, worktree);
+        void vscode.commands.executeCommand(`intelligit.worktree.${action}`, {
+            ...worktree,
+            repositoryRoot: getRepoRoot(),
+        });
     };
 
     /**
@@ -276,14 +298,15 @@ export function registerRepositoryViewEvents(
             ) => boolean,
         ) =>
         async ({ action, hash }: { action: CommitAction; hash: string }): Promise<void> => {
+            const root = getRepoRoot();
             try {
                 await handleCommitContextAction({
                     action,
                     hash,
-                    executor,
-                    gitOps,
+                    executor: executor.deriveFor(root),
+                    gitOps: gitOps.deriveFor(root),
                     mutationGate,
-                    repoRoot: getRepoRoot(),
+                    repoRoot: root,
                     currentBranches: getCurrentBranches(),
                     refreshAll: () => refreshService().refreshAll(),
                     originProvider,

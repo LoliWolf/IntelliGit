@@ -119,6 +119,7 @@ describe("renderHarnessDocument", () => {
                 "webview-filehistory.js",
                 "webview-diffviewer.js",
                 "webview-mergeeditor.js",
+                "webview-partialchanges.js",
             ].includes(context.scriptFile)
                 ? [
                       "/dist/webview-shiki.js",

@@ -161,7 +161,7 @@ function syntaxDecorations(state: EditorState, filePath: string, theme: ShikiThe
 }
 
 /** Debounces full-document tokenization while mapping existing highlights through intervening edits. */
-function syntaxPlugin(filePath: string, initialTheme: ShikiTheme) {
+export function syntaxPlugin(filePath: string, initialTheme: ShikiTheme) {
     return ViewPlugin.fromClass(
         class {
             decorations: DecorationSet;

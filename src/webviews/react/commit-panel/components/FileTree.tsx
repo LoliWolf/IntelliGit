@@ -4,10 +4,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Box } from "@chakra-ui/react";
 import { SectionHeader } from "../../shared/components/SectionHeader";
-import {
-    COMMIT_PANEL_SECTION_GUIDE_LEFT,
-    FileTreeRows,
-} from "../../shared/components/FileTreeRows";
+import { COMMIT_PANEL_SECTION_GUIDE_LEFT } from "../../shared/components/FileTreeRows";
+import { VirtualFileTreeRows } from "./VirtualFileTreeRows";
 import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
 import { useFileDrag } from "../hooks/useFileDrag";
 import type { ThemeFolderIconMap, ThemeTreeIcon, WorkingFile } from "../../../../types";
@@ -23,6 +21,7 @@ interface Props {
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     checkedPaths: Set<string>;
+    partialPaths?: ReadonlySet<string>;
     onToggleFile: (path: string) => void;
     onToggleFolder: (files: WorkingFile[]) => void;
     onToggleSection: (files: WorkingFile[]) => void;
@@ -78,6 +77,7 @@ interface FileSectionProps {
     treeOptions: TreeRenderOptions;
     expandedDirs: Set<string>;
     checkedPaths: Set<string>;
+    partialPaths?: ReadonlySet<string>;
     dragSelectedPaths: Set<string>;
     getUnversionedFilePaths: (file: WorkingFile) => string[];
     onToggleOpen: () => void;
@@ -167,6 +167,7 @@ function FileSection({
     treeOptions,
     expandedDirs,
     checkedPaths,
+    partialPaths,
     dragSelectedPaths,
     getUnversionedFilePaths,
     onToggleOpen,
@@ -203,9 +204,8 @@ function FileSection({
                 vscodeContext: JSON.stringify({
                     webviewSection: "file",
                     filePath: file.path,
-                    ...(repositoryRoot && filePaths.length > 0
-                        ? { repositoryRoot, filePaths }
-                        : {}),
+                    ...(repositoryRoot ? { repositoryRoot } : {}),
+                    ...(repositoryRoot && filePaths.length > 0 ? { filePaths } : {}),
                     webviewUnversionedFile: Boolean(repositoryRoot) && file.status === "?",
                     webviewIgnoredFile: file.status === "!",
                     preventDefaultContextMenuItems: true,
@@ -220,6 +220,8 @@ function FileSection({
                 onFileDragEnd,
                 isDragSelected: file.status === "?" && dragSelectedPaths.has(file.path),
                 isChecked: checkedPaths.has(file.path),
+                isIndeterminate:
+                    checkedPaths.has(file.path) && partialPaths?.has(file.path) === true,
                 onToggleCheck: onToggleFile,
                 checkboxVisibility,
                 // Spends the `staged` flag that already reaches this closure and is
@@ -234,6 +236,7 @@ function FileSection({
         [
             checkboxVisibility,
             checkedPaths,
+            partialPaths,
             dragSelectedPaths,
             getUnversionedFilePaths,
             onFileClick,
@@ -264,6 +267,7 @@ function FileSection({
     );
     const fileWiringsByFile = useMemo(() => {
         const wirings = new Map<WorkingFile, ReturnType<typeof fileWiring>>();
+        if (files.length > 200) return wirings;
         const collect = (treeEntries: TreeEntry[], depth: number): void => {
             for (const entry of treeEntries) {
                 if (entry.type === "file") wirings.set(entry.file, fileWiring(entry.file, depth));
@@ -272,9 +276,10 @@ function FileSection({
         };
         collect(entries, 0);
         return wirings;
-    }, [entries, fileWiring]);
+    }, [entries, fileWiring, files.length]);
     const folderWiringsByPath = useMemo(() => {
         const wirings = new Map<string, ReturnType<typeof folderWiring>>();
+        if (files.length > 200) return wirings;
         const collect = (treeEntries: TreeEntry[]): void => {
             for (const entry of treeEntries) {
                 if (entry.type === "folder") {
@@ -285,7 +290,7 @@ function FileSection({
         };
         collect(entries);
         return wirings;
-    }, [entries, folderWiring]);
+    }, [entries, files.length, folderWiring]);
     const cachedFileWiring = useCallback(
         (file: WorkingFile, depth: number) =>
             fileWiringsByFile.get(file) ?? fileWiring(file, depth),
@@ -313,7 +318,7 @@ function FileSection({
                 drag={{ isOver: isDragOver }}
             />
             {isOpen && (
-                <FileTreeRows
+                <VirtualFileTreeRows
                     entries={entries}
                     depth={0}
                     folderIcon={treeOptions.folderIcon}
@@ -349,6 +354,7 @@ export function FileTree({
     folderExpandedIcon,
     folderIconsByName,
     checkedPaths,
+    partialPaths,
     onToggleFile,
     onToggleFolder,
     onToggleSection,
@@ -532,6 +538,7 @@ export function FileTree({
                         treeOptions={treeOptions}
                         expandedDirs={expandedDirs}
                         checkedPaths={checkedPaths}
+                        partialPaths={partialPaths}
                         dragSelectedPaths={visibleDragSelectedUnversionedPaths}
                         getUnversionedFilePaths={getUnversionedFilePaths}
                         onToggleFile={onToggleFile}
@@ -567,6 +574,7 @@ export function FileTree({
                     treeOptions={treeOptions}
                     expandedDirs={expandedDirs}
                     checkedPaths={checkedPaths}
+                    partialPaths={partialPaths}
                     dragSelectedPaths={visibleDragSelectedUnversionedPaths}
                     getUnversionedFilePaths={getUnversionedFilePaths}
                     onToggleFile={onToggleFile}
@@ -600,6 +608,7 @@ export function FileTree({
                     treeOptions={treeOptions}
                     expandedDirs={expandedDirs}
                     checkedPaths={checkedPaths}
+                    partialPaths={partialPaths}
                     dragSelectedPaths={visibleDragSelectedUnversionedPaths}
                     getUnversionedFilePaths={getUnversionedFilePaths}
                     onToggleFile={onToggleFile}

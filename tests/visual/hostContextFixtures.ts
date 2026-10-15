@@ -3,6 +3,7 @@ import { WEBVIEW_HOST_CONTEXTS } from "./harness/hostContexts";
 
 /** The recorded inbound fixture selected for each resolved production host context. */
 export const HOST_CONTEXT_FIXTURES = {
+    "partial-changes": "dirty.json",
     "commit-graph-card": "clean.json",
     "commit-graph-compact": "clean.json",
     "commit-panel": "dirty.json",

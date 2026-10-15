@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => {
         commitSelectedFromPanel: vi.fn(async (_deps: unknown, _options: unknown) => undefined),
         compareFileWithBranchOrTag: vi.fn(async () => undefined),
         compareFileWithRevision: vi.fn(async () => undefined),
+        compareCommitInfoFileWithLocal: vi.fn(async () => undefined),
+        applySelectedCommitFileChange: vi.fn(async () => undefined),
         fetchFile: vi.fn(async () => "/repo" as string | undefined),
         mergeFileFromContext: vi.fn(),
         rebaseFileFromContext: vi.fn(),
@@ -49,6 +51,8 @@ const mocks = vi.hoisted(() => {
         showErrorMessage: vi.fn(),
         showInformationMessage: vi.fn(),
         showQuickPick: vi.fn(),
+        showInputBox: vi.fn(),
+        showOpenDialog: vi.fn(),
         showWarningMessage: vi.fn(),
         openExternal: vi.fn(),
         l10nT: vi.fn(),
@@ -56,6 +60,17 @@ const mocks = vi.hoisted(() => {
         runCloneFlow: vi.fn(),
         runGitHubCloneFlow: vi.fn(),
         createBranchCommands: vi.fn((_deps: unknown) => []),
+        listWorktrees: vi.fn(async () => []),
+        worktreeInstances: [] as Array<{
+            root: () => string;
+            lockWorktree: ReturnType<typeof vi.fn>;
+            unlockWorktree: ReturnType<typeof vi.fn>;
+            removeWorktree: ReturnType<typeof vi.fn>;
+            moveWorktree: ReturnType<typeof vi.fn>;
+            pruneWorktrees: ReturnType<typeof vi.fn>;
+            repairWorktrees: ReturnType<typeof vi.fn>;
+            dispose: ReturnType<typeof vi.fn>;
+        }>,
         discoverGitRepositories: vi.fn(async () => []),
         runGitOperationFromPanel: vi.fn(async () => undefined),
     };
@@ -73,6 +88,8 @@ vi.mock("vscode", () => ({
         showErrorMessage: mocks.showErrorMessage,
         showInformationMessage: mocks.showInformationMessage,
         showQuickPick: mocks.showQuickPick,
+        showInputBox: mocks.showInputBox,
+        showOpenDialog: mocks.showOpenDialog,
         showWarningMessage: mocks.showWarningMessage,
         withProgress: vi.fn(async (_options, task) => task()),
     },
@@ -109,8 +126,36 @@ vi.mock("../../../src/views/commitPanelActions", () => ({
     runGitOperationFromPanel: mocks.runGitOperationFromPanel,
 }));
 
+vi.mock("../../../src/services/diffService", () => ({
+    compareCommitInfoFileWithLocal: mocks.compareCommitInfoFileWithLocal,
+    applySelectedCommitFileChange: mocks.applySelectedCommitFileChange,
+    beginEditableDiffSession: vi.fn(),
+    createReadonlyDiffUri: vi.fn(),
+}));
+
 vi.mock("../../../src/commands/branchCommands", () => ({
     createBranchCommands: mocks.createBranchCommands,
+}));
+
+vi.mock("../../../src/services/worktreeService", () => ({
+    WorktreeService: class {
+        constructor(
+            _executor: unknown,
+            readonly root: () => string,
+        ) {
+            mocks.worktreeInstances.push(this);
+        }
+        listWorktrees = mocks.listWorktrees;
+        decorateBranches = (branches: Branch[]) => branches;
+        createWorktree = vi.fn(async () => []);
+        lockWorktree = vi.fn(async () => []);
+        unlockWorktree = vi.fn(async () => []);
+        removeWorktree = vi.fn(async () => []);
+        moveWorktree = vi.fn(async () => []);
+        pruneWorktrees = vi.fn(async () => []);
+        repairWorktrees = vi.fn(async () => []);
+        dispose = vi.fn();
+    },
 }));
 
 vi.mock("../../../src/services/publishService", () => ({
@@ -158,6 +203,9 @@ const makeGitOps = (): GitOps => {
         hasAnyCommits: vi.fn(async () => true),
         hasUncommittedChanges: vi.fn(async () => true),
         getStatus: vi.fn(async () => []),
+        getBranches: vi.fn(async () => [
+            { name: "feature/publish", isCurrent: true, isRemote: false },
+        ]),
         rollbackFiles: vi.fn(async () => undefined),
         deriveFor: vi.fn((_root: string) => gitOps),
     } as unknown as GitOps;
@@ -201,6 +249,333 @@ const makeDeps = (gitOps: GitOps) => {
 };
 
 describe("registerRepositoryCommands", () => {
+    it.each([
+        ["conflictAcceptYours", "ours"],
+        ["conflictAcceptTheirs", "theirs"],
+    ] as const)("binds %s to its addressed repository", async (command, side) => {
+        const gitOps = makeGitOps();
+        const scoped = makeGitOps();
+        const deps = makeDeps(gitOps);
+        deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+        scoped.acceptConflictSide = vi.fn(async () => undefined);
+        vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+        registerRepositoryCommands(deps);
+        await mocks.commands.get(`intelligit.${command}`)?.({
+            repositoryRoot: "/repo-b",
+            filePath: "same.txt",
+        });
+        expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo-b");
+        expect(scoped.acceptConflictSide).toHaveBeenCalledWith("same.txt", side);
+    });
+
+    it.each([
+        ["commitFileCherryPickChange", "cherry-pick"],
+        ["commitFileRevertChange", "revert"],
+    ])("binds commit-info %s to the rendered B repository", async (command, mode) => {
+        const gitOps = makeGitOps();
+        const deps = makeDeps(gitOps);
+        const scopedExecutor = {};
+        deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+        vi.mocked(deps.executor.deriveFor).mockReturnValue(scopedExecutor as never);
+        registerRepositoryCommands(deps);
+        const context = {
+            repositoryRoot: "/repo-b",
+            filePath: "same.txt",
+            commitHash: "a".repeat(40),
+        };
+        await mocks.commands.get(`intelligit.${command}`)?.(context);
+        expect(deps.executor.deriveFor).toHaveBeenCalledWith("/repo-b");
+        expect(mocks.applySelectedCommitFileChange).toHaveBeenCalledWith(
+            context,
+            mode,
+            scopedExecutor,
+            expect.any(Function),
+        );
+    });
+
+    it("binds commit-info comparison to B rather than the active graph", async () => {
+        const gitOps = makeGitOps();
+        const scoped = makeGitOps();
+        const deps = makeDeps(gitOps);
+        deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+        vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+        registerRepositoryCommands(deps);
+        const context = {
+            repositoryRoot: "/repo-b",
+            filePath: "same.txt",
+            commitHash: "a".repeat(40),
+        };
+        await mocks.commands.get("intelligit.commitFileCompareWithLocal")?.(context);
+        expect(mocks.compareCommitInfoFileWithLocal).toHaveBeenCalledWith(
+            context,
+            "/repo-b",
+            scoped,
+        );
+    });
+
+    it.each(["checkout", "pushBranch", "renameBranch", "deleteBranch", "worktree.create"])(
+        "captures legacy native %s services before the operation fence",
+        async (action) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            let active = "/repo";
+            deps.getRepoRoot = () => active;
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            scoped.getActiveOperation = vi.fn(async () => {
+                active = "/repo-b";
+                return "none";
+            });
+            gitOps.getActiveOperation = vi.fn(async () => "none");
+            registerRepositoryCommands(deps);
+            await mocks.commands.get(`intelligit.${action}`)?.({
+                branch: { name: "feature/publish", isCurrent: true, isRemote: false },
+            });
+            const captured = mocks.createBranchCommands.mock.calls.at(-1)?.[0] as {
+                gitOps: GitOps;
+                getCurrentBranchName: () => string;
+            };
+            expect(captured.gitOps).toBe(scoped);
+            expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo");
+            expect(captured.getCurrentBranchName()).toBe("feature/publish");
+        },
+    );
+
+    it.each([
+        ["fileRollback", "rollbackFiles"],
+        ["fileDelete", "deleteFile"],
+        ["fileShelve", "stashSave"],
+    ] as const)(
+        "keeps row command %s on B through a confirmation-time switch",
+        async (command, method) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            let active = "/repo";
+            deps.getRepoRoot = () => active;
+            deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+            const mutation = vi.fn(async () => undefined);
+            Object.assign(scoped, { [method]: mutation });
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            mocks.showWarningMessage.mockImplementationOnce(async (...args: unknown[]) => {
+                active = "/repo-c";
+                return args[2];
+            });
+            registerRepositoryCommands(deps);
+
+            await mocks.commands.get(`intelligit.${command}`)?.({
+                repositoryRoot: "/repo-b",
+                filePath: "same.txt",
+            });
+
+            expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo-b");
+            expect(mutation).toHaveBeenCalledOnce();
+            expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(["fileRollback", "fileDelete", "fileShelve"])(
+        "refuses an unknown row repository for %s before confirmation",
+        async (command) => {
+            const gitOps = makeGitOps();
+            registerRepositoryCommands(makeDeps(gitOps));
+            await mocks.commands.get(`intelligit.${command}`)?.({
+                repositoryRoot: "/unknown",
+                filePath: "same.txt",
+            });
+            expect(gitOps.deriveFor).not.toHaveBeenCalled();
+            expect(mocks.showWarningMessage).not.toHaveBeenCalled();
+            expect(mocks.showErrorMessage).toHaveBeenCalled();
+        },
+    );
+
+    it.each(["fetch", "push", "sync"] as const)(
+        "captures graph %s before the active repository changes",
+        async (operation) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            let active = "/repo";
+            deps.getRepoRoot = () => active;
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            mocks.runGitOperationFromPanel.mockImplementationOnce(async (value) => {
+                const actions = value as {
+                    gitOps: GitOps;
+                    refreshData: () => Promise<void>;
+                };
+                expect(actions.gitOps).toBe(scoped);
+                active = "/repo-b";
+                await actions.refreshData();
+            });
+            registerRepositoryCommands(deps);
+
+            await mocks.commands.get(`intelligit.graph.${operation}`)?.();
+
+            expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo");
+            expect(deps.refreshActiveRepository).not.toHaveBeenCalled();
+        },
+    );
+
+    it("publishes captured B after the active repository changes during preflight", async () => {
+        const gitOps = makeGitOps();
+        const scoped = makeGitOps();
+        const deps = makeDeps(gitOps);
+        let active = "/repo";
+        deps.getRepoRoot = () => active;
+        deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+        vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+        scoped.hasAnyCommits = vi.fn(async () => {
+            active = "/repo-c";
+            return true;
+        });
+        scoped.getBranches = vi.fn(async () => [
+            { name: "unpublished-b", isCurrent: true, isRemote: false },
+        ]) as never;
+        registerRepositoryCommands(deps);
+
+        await mocks.commands.get("intelligit.publishBranch")?.("/repo-b");
+
+        expect(mocks.runPublishBranchFlow).toHaveBeenCalledWith(
+            scoped,
+            "unpublished-b",
+            "/repo-b",
+            deps.context.secrets,
+        );
+    });
+
+    it.each(["/unknown", "", 3, null])(
+        "refuses invalid publish repository %j without Git or prompts",
+        async (root) => {
+            const gitOps = makeGitOps();
+            registerRepositoryCommands(makeDeps(gitOps));
+            await expect(mocks.commands.get("intelligit.publishBranch")?.(root)).rejects.toThrow(
+                "repository",
+            );
+            expect(gitOps.deriveFor).not.toHaveBeenCalled();
+            expect(mocks.runPublishBranchFlow).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each([
+        ["delete", "removeWorktree"],
+        ["lock", "lockWorktree"],
+        ["unlock", "unlockWorktree"],
+        ["move", "moveWorktree"],
+        ["prune", "pruneWorktrees"],
+        ["repair", "repairWorktrees"],
+    ] as const)("binds worktree %s to the originating repository", async (action, method) => {
+        const gitOps = makeGitOps();
+        const deps = makeDeps(gitOps);
+        let active = "/repo";
+        deps.getRepoRoot = () => active;
+        deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+        deps.worktreeService = { [method]: vi.fn(async () => []) } as never;
+        mocks.showInputBox.mockImplementationOnce(async () => {
+            active = "/repo-c";
+            return "test lock";
+        });
+        mocks.showOpenDialog.mockImplementationOnce(async () => {
+            active = "/repo-c";
+            return [mocks.FakeUri.file("/repo-b-new")];
+        });
+        registerRepositoryCommands(deps);
+
+        await mocks.commands.get(`intelligit.worktree.${action}`)?.({
+            repositoryRoot: "/repo-b",
+            path: "/repo-b-linked",
+        });
+
+        const scoped = mocks.worktreeInstances.at(-1);
+        expect(scoped).toBeDefined();
+        expect(scoped?.root()).toBe("/repo-b");
+        expect(scoped?.[method]).toHaveBeenCalledOnce();
+        expect(scoped?.dispose).toHaveBeenCalledOnce();
+        expect(deps.worktreeService[method]).not.toHaveBeenCalled();
+    });
+
+    it.each(["mergeIntoCurrent", "updateBranch", "checkout", "deleteBranch", "deleteBranches"])(
+        "keeps worktree safety when listing fails for %s",
+        async (action) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            deps.isKnownRepositoryRoot = () => true;
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            scoped.getBranches = vi.fn(async () => [
+                { name: "main", isCurrent: true, isRemote: false },
+                { name: "topic", isCurrent: false, isRemote: false },
+            ]) as never;
+            scoped.getActiveOperation = vi.fn(async () => "none");
+            mocks.listWorktrees.mockRejectedValue(new Error("worktree metadata unavailable"));
+            registerRepositoryCommands(deps);
+            const invocation = mocks.commands.get(`intelligit.${action}`)?.({
+                repositoryRoot: "/repo-b",
+                branch: { name: "topic" },
+            });
+            if (action === "mergeIntoCurrent" || action === "updateBranch") {
+                await invocation;
+                expect(mocks.branchHandlers.get(`intelligit.${action}`)).toHaveBeenCalledWith({
+                    branch: expect.objectContaining({ name: "topic", isCurrent: false }),
+                });
+            } else {
+                await expect(invocation).rejects.toThrow("worktree metadata unavailable");
+                expect(mocks.branchHandlers.get(`intelligit.${action}`)).not.toHaveBeenCalled();
+            }
+        },
+    );
+    it.each(["mergeIntoCurrent", "updateBranch", "checkout", "renameBranch", "deleteBranch"])(
+        "keeps explicit repository B for %s when active A switches during the fence",
+        async (action) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            let active = "/repo";
+            deps.getRepoRoot = () => active;
+            deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            scoped.getBranches = vi.fn(async () => [
+                { name: "main-b", isCurrent: true, isRemote: false },
+                { name: "topic", isCurrent: false, isRemote: false },
+            ]) as never;
+            scoped.getActiveOperation = vi.fn(async () => {
+                active = "/repo-c";
+                return "none";
+            });
+            registerRepositoryCommands(deps);
+            await mocks.commands.get(`intelligit.${action}`)?.({
+                repositoryRoot: "/repo-b",
+                branch: { name: "topic", isCurrent: true },
+            });
+            expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo-b");
+            const captured = mocks.createBranchCommands.mock.calls.at(-1)?.[0] as unknown as {
+                gitOps: GitOps;
+                getCurrentBranchName: () => string;
+                getCurrentBranches: () => Branch[];
+            };
+            expect(captured.gitOps).toBe(scoped);
+            expect(captured.getCurrentBranchName()).toBe("main-b");
+            expect(
+                captured.getCurrentBranches().find((branch) => branch.name === "topic"),
+            ).toMatchObject({ isCurrent: false });
+        },
+    );
+
+    it.each(["/unknown", "", 3, null])(
+        "rejects explicit invalid branch repository %j before Git",
+        async (repositoryRoot) => {
+            const gitOps = makeGitOps();
+            const deps = makeDeps(gitOps);
+            registerRepositoryCommands(deps);
+            await expect(
+                mocks.commands.get("intelligit.mergeIntoCurrent")?.({
+                    repositoryRoot,
+                    branch: { name: "topic" },
+                }),
+            ).rejects.toThrow("repository");
+            expect(gitOps.deriveFor).not.toHaveBeenCalled();
+        },
+    );
+
     it("opens explicit known-root conflicts after the active repository changes", async () => {
         const gitOps = makeGitOps();
         const scoped = makeGitOps();
@@ -605,6 +980,10 @@ describe("registerRepositoryCommands", () => {
     });
 
     beforeEach(() => {
+        mocks.worktreeInstances.length = 0;
+        mocks.showInputBox.mockReset();
+        mocks.showOpenDialog.mockReset();
+        mocks.showWarningMessage.mockReset();
         mocks.branchHandlers.clear();
         mocks.commands.clear();
         vi.clearAllMocks();
@@ -642,6 +1021,7 @@ describe("registerRepositoryCommands", () => {
                 return { id, handler };
             }),
         );
+        mocks.listWorktrees.mockReset().mockResolvedValue([]);
     });
 
     it("registers Commit File with the selected-file action and an active-operation policy", async () => {

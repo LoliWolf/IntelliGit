@@ -321,6 +321,7 @@ describe("Pull provider root binding", () => {
                     executor,
                     gitOps,
                     getRepoRoot: () => activeRoot,
+                    isKnownRepositoryRoot: (root: string) => [rootA, rootB].includes(root),
                     getCurrentBranches: () => [],
                     getCurrentBranchName: () => "main",
                     refreshActiveRepository: refresh,
