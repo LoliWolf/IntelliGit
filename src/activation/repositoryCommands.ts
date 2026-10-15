@@ -701,8 +701,21 @@ async function runScopedBranchCommand(
             (await rejectWhenOperationInProgress(gitOps))
         )
             return;
-        const [branches] = await Promise.all([gitOps.getBranches(), worktrees.listWorktrees()]);
-        const currentBranches = worktrees.decorateBranches(branches);
+        const canUseUndecoratedBranches =
+            commandId === "intelligit.mergeIntoCurrent" || commandId === "intelligit.updateBranch";
+        const [branches, hasWorktreeMetadata] = await Promise.all([
+            gitOps.getBranches(),
+            worktrees.listWorktrees().then(
+                () => true,
+                (error: unknown) => {
+                    if (!canUseUndecoratedBranches) throw error;
+                    return false;
+                },
+            ),
+        ]);
+        const currentBranches = hasWorktreeMetadata
+            ? worktrees.decorateBranches(branches)
+            : branches;
         const branchesByName = new Map(currentBranches.map((branch) => [branch.name, branch]));
         const payload = item as {
             branch?: Branch;

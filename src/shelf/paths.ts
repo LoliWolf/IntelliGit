@@ -119,8 +119,7 @@ async function ensurePrivateDirectory(directory: string): Promise<void> {
             details = await lstat(candidate);
         } catch (error) {
             if (!isNotFound(error)) throw error;
-            await mkdir(candidate, { mode: 0o700 });
-            details = await lstat(candidate);
+            details = await createDirectoryAfterMiss(candidate);
         }
         if (details.isSymbolicLink()) {
             if (isTrustedSystemAlias(candidate)) {
@@ -163,8 +162,7 @@ async function verifyInternalParent(
         } catch (error) {
             if (!isNotFound(error)) throw error;
             if (!createMissing) throw error;
-            await mkdir(candidate, { mode: 0o700 });
-            details = await lstat(candidate);
+            details = await createDirectoryAfterMiss(candidate);
         }
         if (details.isSymbolicLink() || !details.isDirectory()) {
             throw new ShelfPathError(`Shelf artifact parent is not a real directory: ${candidate}`);
@@ -172,6 +170,18 @@ async function verifyInternalParent(
         current = await realpath(candidate);
         assertContained(root, current);
     }
+}
+
+/** A sibling store may win mkdir; callers still validate the resulting inode and path. */
+async function createDirectoryAfterMiss(
+    directory: string,
+): Promise<Awaited<ReturnType<typeof lstat>>> {
+    try {
+        await mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") throw error;
+    }
+    return lstat(directory);
 }
 
 function assertContained(root: string, candidate: string): void {

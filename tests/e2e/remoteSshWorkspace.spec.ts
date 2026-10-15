@@ -13,6 +13,7 @@ import { resolveVSCodeExecutable } from "./hostFixtures/resolveVSCodeExecutable"
 import { IntelliGitView } from "./pageObjects/intelliGitView";
 import { Workbench } from "./pageObjects/workbench";
 import { removeScratchDirectories } from "../helpers/scratchDirectories";
+import { createRemoteWorkspaceFixtureScript } from "./hostFixtures/remoteSshWorkspace";
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const exec = promisify(execFile);
@@ -40,25 +41,19 @@ test("real Remote SSH updates and merges the selected remote repository", async 
             )
         ).stdout.trim();
     };
-    const fixture = JSON.parse(
-        await remote(`
-            const fs=require("node:fs"),path=require("node:path"),cp=require("node:child_process");
-            const root=fs.mkdtempSync("/tmp/intelligit-ssh-workspace-");
-            const workspace=path.join(root,"workspace"),a=path.join(workspace,"a-active"),b=path.join(workspace,"b-selected");
-            fs.mkdirSync(a,{recursive:true});fs.mkdirSync(path.join(root,"extension"));
-            const git=(cwd,args)=>cp.execFileSync("git",args,{cwd,encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
-            git(a,["init","-b","main"]);
-            const configure=cwd=>{for(const [k,v] of Object.entries({"user.name":"IntelliGit SSH test","user.email":"ssh@example.invalid","commit.gpgSign":"false","core.hooksPath":path.join(root,"no-hooks"),"core.editor":"true","protocol.file.allow":"always"}))git(cwd,["config",k,v]);};
-            configure(a);fs.writeFileSync(path.join(a,"base.txt"),"base\\n");git(a,["add","."]);git(a,["commit","-m","base"]);
-            git(a,["clone","--no-hardlinks",a,b]);configure(b);
-            git(b,["checkout","-b","incoming"]);fs.writeFileSync(path.join(b,"merge.txt"),"remote merge\\n");git(b,["add","."]);git(b,["commit","-m","selected incoming"]);const incoming=git(b,["rev-parse","HEAD"]);git(b,["checkout","main"]);
-            fs.writeFileSync(path.join(a,"pull.txt"),"remote pull\\n");git(a,["add","."]);git(a,["commit","-m","remote advance"]);git(a,["branch","incoming"]);
-            console.log(JSON.stringify({root,workspace,a,b,aHead:git(a,["rev-parse","HEAD"]),incoming}));
-        `),
-    ) as { root: string; workspace: string; a: string; b: string; aHead: string; incoming: string };
     const local = await mkdtemp(path.join(os.tmpdir(), "intelligit-ssh-client-"));
+    let remoteRoot: string | undefined;
     let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
     try {
+        const fixture = JSON.parse(await remote(createRemoteWorkspaceFixtureScript())) as {
+            root: string;
+            workspace: string;
+            a: string;
+            b: string;
+            aHead: string;
+            incoming: string;
+        };
+        remoteRoot = fixture.root;
         const profile = path.join(local, "profile");
         const extensions = path.join(local, "extensions");
         await mkdir(extensions);
@@ -165,9 +160,10 @@ test("real Remote SSH updates and merges the selected remote repository", async 
         await page.screenshot({ path: testInfo.outputPath("remote-ssh-selected-repository.png") });
     } finally {
         await app?.close();
-        await remote(`
+        if (remoteRoot)
+            await remote(`
             const fs=require("node:fs"),cp=require("node:child_process");
-            const root=${JSON.stringify(fixture.root)};
+            const root=${JSON.stringify(remoteRoot)};
             if(!/^\\/tmp\\/intelligit-ssh-workspace-[A-Za-z0-9]+$/.test(root))throw Error("Unexpected cleanup root");
             const output=cp.execFileSync("ps",["-axo","pid=,command="],{encoding:"utf8"});
             for(const line of output.split("\\n")){const match=/^\\s*(\\d+)\\s+(.*)$/.exec(line);if(match&&match[2].includes(root+"/server/")){try{process.kill(Number(match[1]),"SIGTERM")}catch{}}}

@@ -2,7 +2,7 @@ import path from "node:path";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { expect, test } from "./fixtureWorkspace";
 import { runGitRaw } from "../fixtures/repo/gitRun";
-import { waitForE2eChannelReady } from "./controlChannelClient";
+import { E2eControlChannelClient, waitForE2eChannelReady } from "./controlChannelClient";
 import {
     dismissFirstRunDialogs,
     launchFixtureWorkspace,
@@ -45,6 +45,7 @@ test.describe("originating repository branch actions", () => {
                 operation === "update" ? aHead : await git(b, ["rev-parse", "incoming"]);
             expect(bHead).not.toBe(expectedHead);
             const canonicalB = await realpath(b);
+            const canonicalA = await realpath(a);
             const app = await launchFixtureWorkspace({
                 executablePath: await resolveVSCodeExecutable(REPO_ROOT),
                 repoRoot: REPO_ROOT,
@@ -54,9 +55,37 @@ test.describe("originating repository branch actions", () => {
             });
             try {
                 const page = await app.firstWindow();
+                const hostWindow = await app.browserWindow(page);
+                await hostWindow.evaluate((browserWindow) => {
+                    browserWindow.setContentSize(1280, 900);
+                });
+                await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1280);
                 await dismissFirstRunDialogs(page);
                 await waitForE2eChannelReady(fixtureWorkspace.channelDir);
                 const workbench = new Workbench(page);
+                const control = new E2eControlChannelClient(fixtureWorkspace.channelDir);
+                const activeRoot = async () => {
+                    const response = await control.request({
+                        store: "memento",
+                        scope: "workspace",
+                        operation: "snapshot",
+                        key: "intelligit.selectedRepositoryRoot",
+                    });
+                    return response.ok && response.result?.kind === "value"
+                        ? response.result.value
+                        : undefined;
+                };
+                await workbench.runCommand("IntelliGit: Select Repository");
+                await page
+                    .locator(".quick-input-widget")
+                    .getByText("workspace", { exact: true })
+                    .click();
+                await expect.poll(activeRoot).toBe(canonicalA);
+                for (const name of [/^Toggle Primary Side Bar/, /^Toggle Secondary Side Bar/]) {
+                    const toggle = page.getByRole("button", { name });
+                    if ((await toggle.getAttribute("aria-pressed")) === "true")
+                        await toggle.click();
+                }
                 await workbench.runCommand("IntelliGit: Undock...");
                 await page.getByRole("option", { name: /^Undock in Editor Tab/ }).click();
                 const frame = await new IntelliGitView(page).revealUndocked();
@@ -66,6 +95,7 @@ test.describe("originating repository branch actions", () => {
                 await expect(row).toBeVisible();
                 await row.click();
                 await expect(row).toHaveAttribute("aria-current", "true");
+                await expect.poll(activeRoot).toBe(canonicalA);
                 const local = frame
                     .getByTestId("undocked-branch-section")
                     .locator('div:has(> [data-branch-section-guide="local"])');

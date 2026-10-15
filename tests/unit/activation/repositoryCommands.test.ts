@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
         runCloneFlow: vi.fn(),
         runGitHubCloneFlow: vi.fn(),
         createBranchCommands: vi.fn((_deps: unknown) => []),
+        listWorktrees: vi.fn(async () => []),
         discoverGitRepositories: vi.fn(async () => []),
         runGitOperationFromPanel: vi.fn(async () => undefined),
     };
@@ -115,7 +116,7 @@ vi.mock("../../../src/commands/branchCommands", () => ({
 
 vi.mock("../../../src/services/worktreeService", () => ({
     WorktreeService: class {
-        listWorktrees = vi.fn(async () => []);
+        listWorktrees = mocks.listWorktrees;
         decorateBranches = (branches: Branch[]) => branches;
         createWorktree = vi.fn(async () => []);
         dispose = vi.fn();
@@ -210,6 +211,36 @@ const makeDeps = (gitOps: GitOps) => {
 };
 
 describe("registerRepositoryCommands", () => {
+    it.each(["mergeIntoCurrent", "updateBranch", "checkout", "deleteBranch", "deleteBranches"])(
+        "keeps worktree safety when listing fails for %s",
+        async (action) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            deps.isKnownRepositoryRoot = () => true;
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            scoped.getBranches = vi.fn(async () => [
+                { name: "main", isCurrent: true, isRemote: false },
+                { name: "topic", isCurrent: false, isRemote: false },
+            ]) as never;
+            scoped.getActiveOperation = vi.fn(async () => "none");
+            mocks.listWorktrees.mockRejectedValue(new Error("worktree metadata unavailable"));
+            registerRepositoryCommands(deps);
+            const invocation = mocks.commands.get(`intelligit.${action}`)?.({
+                repositoryRoot: "/repo-b",
+                branch: { name: "topic" },
+            });
+            if (action === "mergeIntoCurrent" || action === "updateBranch") {
+                await invocation;
+                expect(mocks.branchHandlers.get(`intelligit.${action}`)).toHaveBeenCalledWith({
+                    branch: expect.objectContaining({ name: "topic", isCurrent: false }),
+                });
+            } else {
+                await expect(invocation).rejects.toThrow("worktree metadata unavailable");
+                expect(mocks.branchHandlers.get(`intelligit.${action}`)).not.toHaveBeenCalled();
+            }
+        },
+    );
     it.each(["mergeIntoCurrent", "updateBranch", "checkout", "renameBranch", "deleteBranch"])(
         "keeps explicit repository B for %s when active A switches during the fence",
         async (action) => {
@@ -704,6 +735,7 @@ describe("registerRepositoryCommands", () => {
                 return { id, handler };
             }),
         );
+        mocks.listWorktrees.mockReset().mockResolvedValue([]);
     });
 
     it("registers Commit File with the selected-file action and an active-operation policy", async () => {

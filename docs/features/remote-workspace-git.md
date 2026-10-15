@@ -26,6 +26,10 @@ refreshes and conflicts back to that repository. Names absent from the captured
 repository are refused. Branch lookup is indexed rather than quadratic for bulk
 selection.
 
+Merge and Update can use undecorated branch metadata if the auxiliary worktree
+listing fails. Checkout, Delete and other commands remain blocked on that failure;
+an unavailable worktree inventory is not substituted with an empty safe list.
+
 Undocked Fetch, Push and Sync also derive their Git facade before waiting for
 progress or consent. Pull retains its existing captured-root update transaction.
 No Git error is converted into success, and no history, index, worktree or
@@ -36,6 +40,14 @@ partial-commit safety limit is relaxed.
 The normal native suite includes `branchRepositoryScope.spec.ts`. Its two real
 Git/VS Code cases make A a valid no-op target and B a target with actual incoming
 content, then verify Update and Merge advance B while A stays unchanged.
+It explicitly selects docked A through native UI, verifies the existing
+repository-selection memento, and closes the host sidebars at 1280 content pixels
+so responsive pane hiding does not prevent the test from reaching the selector.
+
+Cold multi-repository startup also exercises concurrent shelf-parent creation.
+An `EEXIST` after a missing-directory observation is rechecked with `lstat`,
+followed by the existing directory, symlink and containment checks. Files and
+symlinks raced into the path remain refused.
 
 Unit and integration cases cover explicit-root routing, selection changes during
 the operation fence, invalid roots, stale renderer callbacks, workspace-host
