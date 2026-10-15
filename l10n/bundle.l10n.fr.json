@@ -877,5 +877,9 @@
     "Discard recovery record": "Supprimer l'enregistrement de récupération",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Le commit sélectionné a réussi, mais ses métadonnées de sélection doivent être vérifiées. Ne relancez pas le commit.",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Le commit sélectionné n'a pas été publié, mais ses métadonnées de sélection n'ont pas pu être restaurées. Vérifiez la sélection avant de réessayer.",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Les modifications sélectionnées n'ont pas été ajoutées à l'index, mais leurs métadonnées de sélection n'ont pas pu être restaurées. Vérifiez la sélection avant de réessayer."
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Les modifications sélectionnées n'ont pas été ajoutées à l'index, mais leurs métadonnées de sélection n'ont pas pu être restaurées. Vérifiez la sélection avant de réessayer.",
+    "The requested repository is no longer available. Select it again before running branch actions.": "Le dépôt demandé n'est plus disponible. Sélectionnez-le à nouveau avant les actions de branche.",
+    "The selected branch is no longer available. Refresh the repository and try again.": "La branche sélectionnée n'est plus disponible. Actualisez le dépôt et réessayez.",
+    "Branch action failed: {message}": "Échec de l'action de branche : {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit doit s'exécuter sur l'hôte de l'espace de travail distant. Installez-le ou activez-le sur cet hôte et supprimez toute substitution d'hôte d'interface dans remote.extensionKind avant les commandes Git."
 }

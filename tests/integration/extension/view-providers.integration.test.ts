@@ -2474,6 +2474,38 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("UndockedViewProvider rejects a stale branch row after selecting another known root", async () => {
+        const { UndockedViewProvider } = await import("../../../src/views/UndockedViewProvider");
+        const gitOps = makeGitOpsMock();
+        const provider = createTestUndockedViewProvider(
+            UndockedViewProvider,
+            { fsPath: "/ext", path: "/ext" } as never,
+            gitOps as never,
+            { fsPath: "/repo", path: "/repo" } as never,
+            makeCredentialStore() as never,
+        );
+        provider.setRepositories(
+            [
+                { root: "/repo", label: "A" },
+                { root: "/repo-b", label: "B" },
+            ],
+            "/repo-b",
+        );
+        const action = vi.fn();
+        provider.onBranchAction(action);
+        const host = provider as unknown as { handleMessage(message: unknown): Promise<void> };
+        await expect(
+            host.handleMessage({
+                type: "branchAction",
+                repositoryRoot: "/repo",
+                action: "mergeIntoCurrent",
+                branchName: "topic",
+            }),
+        ).rejects.toThrow("repository is no longer available");
+        expect(action).not.toHaveBeenCalled();
+        provider.dispose();
+    });
+
     it("UndockedViewProvider handles graph and commit-panel message protocols", async () => {
         const { UndockedViewProvider } = await import("../../../src/views/UndockedViewProvider");
         const gitOps = makeGitOpsMock();
@@ -2602,7 +2634,12 @@ describe("view providers integration", () => {
         await send({ type: "filterText", text: "fix" });
         await send({ type: "filterBranch", branch: "main" });
         await send({ type: "loadMore" });
-        await send({ type: "branchAction", action: "checkout", branchName: "main" });
+        await send({
+            type: "branchAction",
+            action: "checkout",
+            branchName: "main",
+            repositoryRoot: "/repo",
+        });
         await send({ type: "commitAction", action: "copyRevision", hash: "abc1234" });
         await send({ type: "openCommitFileDiff", commitHash: "abc1234", filePath: "src/a.ts" });
         await send({ type: "dock" });

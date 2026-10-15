@@ -14,6 +14,7 @@ import { activateE2eControlChannel } from "./e2e/controlChannel";
 import { setDiffViewerExtensionUri } from "./diff/diffViewerOpener";
 import { registerDiffViewSwitch } from "./diff/diffViewSwitch";
 import { registerEditableDiffEditorProvider } from "./views/EditableDiffEditorProvider";
+import { assertWorkspaceExtensionHost } from "./activation/workspaceHost";
 import {
     HAS_MERGE_CONFLICTS_CONTEXT,
     registerStaleUndockedPanelSerializer,
@@ -30,6 +31,7 @@ import {
  * created here or by delegated modes are owned by `context.subscriptions`.
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    if (!assertWorkspaceExtensionHost(context)) return;
     setDiffViewerExtensionUri(context.extensionUri);
     const e2eControlChannel = activateE2eControlChannel(context);
     context.subscriptions.push({ dispose: () => e2eControlChannel.dispose() });

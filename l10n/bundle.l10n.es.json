@@ -877,5 +877,9 @@
     "Discard recovery record": "Descartar registro de recuperación",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "El commit seleccionado se completó, pero sus metadatos de selección requieren revisión. No repita el commit.",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "El commit seleccionado no se publicó, pero no se pudieron restaurar sus metadatos de selección. Revise la selección antes de volver a intentarlo.",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Los cambios seleccionados no se añadieron al índice, pero no se pudieron restaurar sus metadatos de selección. Revise la selección antes de volver a intentarlo."
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Los cambios seleccionados no se añadieron al índice, pero no se pudieron restaurar sus metadatos de selección. Revise la selección antes de volver a intentarlo.",
+    "The requested repository is no longer available. Select it again before running branch actions.": "El repositorio solicitado ya no está disponible. Vuelva a seleccionarlo antes de ejecutar acciones de rama.",
+    "The selected branch is no longer available. Refresh the repository and try again.": "La rama seleccionada ya no está disponible. Actualice el repositorio y vuelva a intentarlo.",
+    "Branch action failed: {message}": "Error en la acción de rama: {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit debe ejecutarse en el host del espacio de trabajo remoto. Instálelo o actívelo allí y elimine cualquier anulación de host de interfaz en remote.extensionKind antes de ejecutar comandos Git."
 }

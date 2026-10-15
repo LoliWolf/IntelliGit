@@ -113,6 +113,15 @@ vi.mock("../../../src/commands/branchCommands", () => ({
     createBranchCommands: mocks.createBranchCommands,
 }));
 
+vi.mock("../../../src/services/worktreeService", () => ({
+    WorktreeService: class {
+        listWorktrees = vi.fn(async () => []);
+        decorateBranches = (branches: Branch[]) => branches;
+        createWorktree = vi.fn(async () => []);
+        dispose = vi.fn();
+    },
+}));
+
 vi.mock("../../../src/services/publishService", () => ({
     runPublishBranchFlow: mocks.runPublishBranchFlow,
 }));
@@ -201,6 +210,59 @@ const makeDeps = (gitOps: GitOps) => {
 };
 
 describe("registerRepositoryCommands", () => {
+    it.each(["mergeIntoCurrent", "updateBranch", "checkout", "renameBranch", "deleteBranch"])(
+        "keeps explicit repository B for %s when active A switches during the fence",
+        async (action) => {
+            const gitOps = makeGitOps();
+            const scoped = makeGitOps();
+            const deps = makeDeps(gitOps);
+            let active = "/repo";
+            deps.getRepoRoot = () => active;
+            deps.isKnownRepositoryRoot = (root) => ["/repo", "/repo-b"].includes(root);
+            vi.mocked(gitOps.deriveFor).mockReturnValue(scoped);
+            scoped.getBranches = vi.fn(async () => [
+                { name: "main-b", isCurrent: true, isRemote: false },
+                { name: "topic", isCurrent: false, isRemote: false },
+            ]) as never;
+            scoped.getActiveOperation = vi.fn(async () => {
+                active = "/repo-c";
+                return "none";
+            });
+            registerRepositoryCommands(deps);
+            await mocks.commands.get(`intelligit.${action}`)?.({
+                repositoryRoot: "/repo-b",
+                branch: { name: "topic", isCurrent: true },
+            });
+            expect(gitOps.deriveFor).toHaveBeenCalledWith("/repo-b");
+            const captured = mocks.createBranchCommands.mock.calls.at(-1)?.[0] as unknown as {
+                gitOps: GitOps;
+                getCurrentBranchName: () => string;
+                getCurrentBranches: () => Branch[];
+            };
+            expect(captured.gitOps).toBe(scoped);
+            expect(captured.getCurrentBranchName()).toBe("main-b");
+            expect(
+                captured.getCurrentBranches().find((branch) => branch.name === "topic"),
+            ).toMatchObject({ isCurrent: false });
+        },
+    );
+
+    it.each(["/unknown", "", 3, null])(
+        "rejects explicit invalid branch repository %j before Git",
+        async (repositoryRoot) => {
+            const gitOps = makeGitOps();
+            const deps = makeDeps(gitOps);
+            registerRepositoryCommands(deps);
+            await expect(
+                mocks.commands.get("intelligit.mergeIntoCurrent")?.({
+                    repositoryRoot,
+                    branch: { name: "topic" },
+                }),
+            ).rejects.toThrow("repository");
+            expect(gitOps.deriveFor).not.toHaveBeenCalled();
+        },
+    );
+
     it("opens explicit known-root conflicts after the active repository changes", async () => {
         const gitOps = makeGitOps();
         const scoped = makeGitOps();

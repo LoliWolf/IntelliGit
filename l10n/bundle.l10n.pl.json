@@ -877,5 +877,9 @@
     "Discard recovery record": "Usuń zapis odzyskiwania",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Wybrany commit został utworzony, ale metadane wyboru wymagają sprawdzenia. Nie ponawiaj commitu.",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Wybrany commit nie został opublikowany, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą.",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Wybrane zmiany nie zostały dodane do indeksu, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą."
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Wybrane zmiany nie zostały dodane do indeksu, ale nie udało się przywrócić metadanych wyboru. Sprawdź wybór przed ponowną próbą.",
+    "The requested repository is no longer available. Select it again before running branch actions.": "Żądane repozytorium nie jest już dostępne. Wybierz je ponownie przed operacjami na gałęziach.",
+    "The selected branch is no longer available. Refresh the repository and try again.": "Wybrana gałąź nie jest już dostępna. Odśwież repozytorium i spróbuj ponownie.",
+    "Branch action failed: {message}": "Operacja na gałęzi nie powiodła się: {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit musi działać na hoście zdalnego obszaru roboczego. Zainstaluj lub włącz go tam i usuń wymuszenie hosta UI w remote.extensionKind przed poleceniami Git."
 }

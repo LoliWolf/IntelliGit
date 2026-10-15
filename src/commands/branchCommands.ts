@@ -394,7 +394,11 @@ async function confirmSingleBranchDelete(
 }
 
 /** Deletes a validated remote branch through Git progress UI and refreshes branch state afterward. */
-async function deleteRemoteBranch(branch: Branch, executor: GitExecutor): Promise<void> {
+async function deleteRemoteBranch(
+    branch: Branch,
+    executor: GitExecutor,
+    refresh: () => Promise<void>,
+): Promise<void> {
     const target = resolveRemoteDeleteTarget(branch);
     if (!target) {
         vscode.window.showErrorMessage(
@@ -421,7 +425,7 @@ async function deleteRemoteBranch(branch: Branch, executor: GitExecutor): Promis
             remoteBranch: target.remoteBranch,
         }),
     );
-    await vscode.commands.executeCommand("intelligit.refresh");
+    await refresh();
 }
 
 /** Deletes a local branch, then refreshes before offering post-delete restore or remote actions. */
@@ -430,11 +434,12 @@ async function deleteLocalBranch(
     executor: GitExecutor,
     getCurrentBranches: () => Branch[],
     forceDelete: boolean,
+    refresh: () => Promise<void>,
 ): Promise<void> {
     // Delete must complete before refresh/actions observe the new branch state.
     // react-doctor-disable-next-line react-doctor/async-parallel
     await executor.run(["branch", forceDelete ? "-D" : "-d", branch.name]);
-    await vscode.commands.executeCommand("intelligit.refresh");
+    await refresh();
     await showDeletedBranchActions(branch, getCurrentBranches(), executor);
 }
 
@@ -444,6 +449,7 @@ async function handleUnmergedBranchDelete(
     executor: GitExecutor,
     getCurrentBranches: () => Branch[],
     deleteAnywayLabel: string,
+    refresh: () => Promise<void>,
 ): Promise<void> {
     const forceConfirm = await vscode.window.showWarningMessage(
         vscode.l10n.t(
@@ -456,7 +462,7 @@ async function handleUnmergedBranchDelete(
     if (forceConfirm !== deleteAnywayLabel) return;
 
     try {
-        await deleteLocalBranch(branch, executor, getCurrentBranches, true);
+        await deleteLocalBranch(branch, executor, getCurrentBranches, true, refresh);
     } catch (forceErr) {
         vscode.window.showErrorMessage(
             vscode.l10n.t("Delete failed: {message}", { message: getErrorMessage(forceErr) }),
@@ -469,16 +475,23 @@ async function deleteSingleBranch(
     branch: Branch,
     executor: GitExecutor,
     getCurrentBranches: () => Branch[],
+    refresh: () => Promise<void>,
 ): Promise<void> {
     const confirmation = await confirmSingleBranchDelete(branch, executor, getCurrentBranches);
     if (!confirmation) return;
 
     try {
         if (confirmation.isRemote) {
-            await deleteRemoteBranch(branch, executor);
+            await deleteRemoteBranch(branch, executor, refresh);
             return;
         }
-        await deleteLocalBranch(branch, executor, getCurrentBranches, confirmation.forceDelete);
+        await deleteLocalBranch(
+            branch,
+            executor,
+            getCurrentBranches,
+            confirmation.forceDelete,
+            refresh,
+        );
     } catch (err) {
         if (!confirmation.isRemote && isBranchNotFullyMergedError(err)) {
             await handleUnmergedBranchDelete(
@@ -486,6 +499,7 @@ async function deleteSingleBranch(
                 executor,
                 getCurrentBranches,
                 confirmation.deleteAnywayLabel,
+                refresh,
             );
             return;
         }
@@ -520,6 +534,10 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
         openConflictSession,
         refreshConflictUi,
     } = deps;
+    const refreshRepository = async (): Promise<void> => {
+        if (deps.refreshRepository) await deps.refreshRepository();
+        else await vscode.commands.executeCommand("intelligit.refresh");
+    };
 
     /** Runs the prompt/service flow for branch-originated worktree creation commands. */
     const runCreateWorktree = async (branch: Branch, forceNewBranch = false): Promise<void> => {
@@ -530,7 +548,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
             showTimedInformationMessage(
                 vscode.l10n.t("Created worktree at {path}", { path: opts.path }),
             );
-            await vscode.commands.executeCommand("intelligit.refresh");
+            await refreshRepository();
         } catch (err) {
             vscode.window.showErrorMessage(
                 vscode.l10n.t("Create worktree failed: {message}", {
@@ -584,7 +602,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     showTimedInformationMessage(
                         vscode.l10n.t("Checked out {branch}", { branch: result.branch }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(
@@ -618,7 +636,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     showTimedInformationMessage(
                         vscode.l10n.t("Created and checked out {branch}", { branch: newName }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(
@@ -660,7 +678,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                             onto,
                         }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(
@@ -687,7 +705,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     showTimedInformationMessage(
                         vscode.l10n.t("Rebased onto {branch}", { branch: name }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(
@@ -705,9 +723,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 await runMergeCommand(name, gitOps, {
                     targetBranch: getCurrentBranchName() || undefined,
                     merge: (branch) => executor.run(["merge", branch]),
-                    refresh: async () => {
-                        await vscode.commands.executeCommand("intelligit.refresh");
-                    },
+                    refresh: refreshRepository,
                     refreshConflicts: refreshConflictUi,
                     openConflictSession,
                 });
@@ -735,11 +751,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                         await runGitOperationFromPanel(
                             {
                                 gitOps,
-                                refreshData:
-                                    deps.refreshRepository ??
-                                    (async () => {
-                                        await vscode.commands.executeCommand("intelligit.refresh");
-                                    }),
+                                refreshData: deps.refreshRepository ?? refreshRepository,
                                 openConflictSession: async (context) => {
                                     await openConflictSession({
                                         sourceBranch: context.upstream,
@@ -770,7 +782,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     showTimedInformationMessage(
                         vscode.l10n.t("Updated {branch}", { branch: name }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = formatUpdateFailureMessage(err);
                     vscode.window.showErrorMessage(
@@ -842,14 +854,14 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     showTimedInformationMessage(
                         vscode.l10n.t("Pushed {branch}", { branch: branch.name }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     if (err instanceof UpstreamPushDeclinedError) return;
                     if (
                         branch.isCurrent &&
                         (await promptRebaseAfterPushRejection(err, gitOps, pushBranch))
                     ) {
-                        await vscode.commands.executeCommand("intelligit.refresh");
+                        await refreshRepository();
                         return;
                     }
                     const msg = getErrorMessage(err);
@@ -899,7 +911,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                             newBranch: newName,
                         }),
                     );
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                 } catch (err) {
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(
@@ -913,7 +925,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
             handler: async (item) => {
                 const branch = item.branch;
                 if (!branch) return;
-                await deleteSingleBranch(branch, executor, getCurrentBranches);
+                await deleteSingleBranch(branch, executor, getCurrentBranches, refreshRepository);
             },
         },
         {
@@ -984,7 +996,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                         } catch (err) {
                             const msg = getErrorMessage(err);
                             if (deleted.length > 0) {
-                                await vscode.commands.executeCommand("intelligit.refresh");
+                                await refreshRepository();
                             }
                             const message =
                                 deleted.length > 0
@@ -1005,7 +1017,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                         }
                     }
 
-                    await vscode.commands.executeCommand("intelligit.refresh");
+                    await refreshRepository();
                     showTimedInformationMessage(
                         vscode.l10n.t("Deleted {count} branch(es).", { count: deleted.length }),
                     );

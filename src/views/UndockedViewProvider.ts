@@ -975,10 +975,23 @@ export class UndockedViewProvider {
         );
     }
 
+    /** Rejects branch messages from a retired repository render without falling back to another root. */
+    private assertBranchMessageRoot(msg: UnifiedOutbound, root: string): void {
+        if (msg.type !== "branchAction" && msg.type !== "deleteBranches") return;
+        if (msg.repositoryRoot !== root || !this.findRepository(msg.repositoryRoot)) {
+            throw new Error(
+                vscode.l10n.t(
+                    "The requested repository is no longer available. Select it again before running branch actions.",
+                ),
+            );
+        }
+    }
+
     /** Dispatches validated webview actions, routing Pull through a captured repository facade. */
     private async handleMessage(msg: UnifiedOutbound): Promise<void> {
         const commitRepositoryRoot = this.repoRootUri.fsPath;
         const commitDraftStorageKey = this.getCommitDraftStorageKey();
+        this.assertBranchMessageRoot(msg, commitRepositoryRoot);
         const actionDeps = {
             gitOps: this.gitOps,
             refreshData: () => this.refreshCommitPanelData(),
@@ -1263,10 +1276,17 @@ export class UndockedViewProvider {
                 break;
             case "fetch":
             case "sync":
-                await runGitOperationFromPanel(actionDeps, msg.type);
+                await runGitOperationFromPanel(
+                    { ...actionDeps, gitOps: this.gitOps.deriveFor(commitRepositoryRoot) },
+                    msg.type,
+                );
                 break;
             case "push":
-                await runGitOperationFromPanel(actionDeps, "push", msg.force === true);
+                await runGitOperationFromPanel(
+                    { ...actionDeps, gitOps: this.gitOps.deriveFor(commitRepositoryRoot) },
+                    "push",
+                    msg.force === true,
+                );
                 break;
             case "openRepository":
                 await vscode.commands.executeCommand(

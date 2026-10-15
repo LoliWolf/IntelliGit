@@ -128,6 +128,8 @@ type GraphOutbound =
     | {
           /** Command requesting a branch context-menu action on the host side. */
           type: "branchAction";
+          /** Repository that supplied the rendered branch row. */
+          repositoryRoot: string;
           /** Validated against shared branch action values before command dispatch. */
           action: BranchAction;
           /** Branch name from the latest graph branch snapshot. */
@@ -136,6 +138,8 @@ type GraphOutbound =
     | {
           /** Command requesting deletion of command/ctrl-selected branch rows. */
           type: "deleteBranches";
+          /** Repository that supplied the selected branch rows. */
+          repositoryRoot: string;
           /** Selected branch rows from the latest graph branch snapshot. */
           branches?: Branch[];
           /** Legacy payload kept so older webviews fail closed through host validation. */

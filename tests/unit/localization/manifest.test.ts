@@ -47,6 +47,8 @@ type CommandContribution = {
 };
 
 type ExtensionManifest = {
+    extensionKind?: string[];
+    capabilities?: { virtualWorkspaces?: { supported?: boolean } };
     activationEvents?: string[];
     contributes?: {
         commands?: CommandContribution[];
@@ -73,6 +75,13 @@ type ExtensionManifest = {
 };
 
 describe("extension manifest", () => {
+    it("requires the workspace extension host and refuses virtual-only filesystem workspaces", () => {
+        const manifest = JSON.parse(
+            readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+        ) as ExtensionManifest;
+        expect(manifest.extensionKind).toEqual(["workspace"]);
+        expect(manifest.capabilities?.virtualWorkspaces?.supported).toBe(false);
+    });
     it("contributes commit file context actions to the undocked webview", () => {
         const manifest = JSON.parse(
             readFileSync(path.join(process.cwd(), "package.json"), "utf8"),

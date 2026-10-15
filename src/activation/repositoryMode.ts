@@ -882,7 +882,18 @@ export async function activateRepositoryMode(
             undocked.onBranchAction(({ action, branchName }) => {
                 const branch = undockedBranches.find((b) => b.name === branchName);
                 if (!branch) return;
-                void vscode.commands.executeCommand(`intelligit.${action}`, { branch });
+                void vscode.commands
+                    .executeCommand(`intelligit.${action}`, {
+                        branch,
+                        repositoryRoot: getUndockedSelectedRepositoryRoot(),
+                    })
+                    .then(undefined, (error) => {
+                        vscode.window.showErrorMessage(
+                            vscode.l10n.t("Branch action failed: {message}", {
+                                message: getErrorMessage(error),
+                            }),
+                        );
+                    });
             }),
             undocked.onWorktreeAction?.(({ action, path: worktreePath }) => {
                 const worktree = undockedWorktrees.find(
@@ -917,7 +928,18 @@ export async function activateRepositoryMode(
                     );
                     return;
                 }
-                void vscode.commands.executeCommand("intelligit.deleteBranches", { branches });
+                void vscode.commands
+                    .executeCommand("intelligit.deleteBranches", {
+                        branches,
+                        repositoryRoot: getUndockedSelectedRepositoryRoot(),
+                    })
+                    .then(undefined, (error) => {
+                        vscode.window.showErrorMessage(
+                            vscode.l10n.t("Branch action failed: {message}", {
+                                message: getErrorMessage(error),
+                            }),
+                        );
+                    });
             }) ?? new vscode.Disposable(() => undefined),
             undocked.onCommitAction(async ({ action, hash }) => {
                 const originProvider = undocked;
@@ -1358,6 +1380,14 @@ export async function activateRepositoryMode(
         setActiveRepository,
         clearSelection,
         refreshActiveRepository,
+        refreshRepository: async (root) => {
+            if (areSameRepositoryRoot(root, repoRoot)) await refreshService.refreshAll();
+            else {
+                await commitPanel.refreshSilent();
+                if (undocked && areSameRepositoryRoot(root, getUndockedSelectedRepositoryRoot()))
+                    await loadUndockedData();
+            }
+        },
         refreshService: getRefreshService,
         showUndockedGitLog,
         pickUndockTargetAndOpen,

@@ -877,5 +877,9 @@
     "Discard recovery record": "Discard recovery record",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying."
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.",
+    "The requested repository is no longer available. Select it again before running branch actions.": "The requested repository is no longer available. Select it again before running branch actions.",
+    "The selected branch is no longer available. Refresh the repository and try again.": "The selected branch is no longer available. Refresh the repository and try again.",
+    "Branch action failed: {message}": "Branch action failed: {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands."
 }

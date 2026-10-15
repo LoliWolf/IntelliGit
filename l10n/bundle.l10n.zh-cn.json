@@ -877,5 +877,9 @@
     "Discard recovery record": "丢弃恢复记录",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "所选更改已提交，但选择元数据需要检查。请勿重复提交。",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "所选更改尚未提交，但无法恢复选择元数据。请先检查选择内容再重试。",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "所选更改尚未暂存，但无法恢复选择元数据。请先检查选择内容再重试。"
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "所选更改尚未暂存，但无法恢复选择元数据。请先检查选择内容再重试。",
+    "The requested repository is no longer available. Select it again before running branch actions.": "请求的仓库已不可用。请重新选择仓库后再执行分支操作。",
+    "The selected branch is no longer available. Refresh the repository and try again.": "所选分支已不可用。请刷新仓库后重试。",
+    "Branch action failed: {message}": "分支操作失败：{message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit 必须在远程工作区宿主上运行。请在远程主机安装或启用插件，并移除 remote.extensionKind 中强制使用 UI 宿主的配置后再执行 Git 命令。"
 }

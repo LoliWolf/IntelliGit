@@ -213,7 +213,15 @@ export function registerRepositoryViewEvents(
     }): void => {
         const branch = getCurrentBranches().find((b) => b.name === branchName);
         if (!branch) return;
-        void vscode.commands.executeCommand(`intelligit.${action}`, { branch });
+        void vscode.commands
+            .executeCommand(`intelligit.${action}`, { branch, repositoryRoot: getRepoRoot() })
+            .then(undefined, (error) => {
+                vscode.window.showErrorMessage(
+                    vscode.l10n.t("Branch action failed: {message}", {
+                        message: getErrorMessage(error),
+                    }),
+                );
+            });
     };
 
     /**
@@ -237,7 +245,18 @@ export function registerRepositoryViewEvents(
             );
             return;
         }
-        void vscode.commands.executeCommand("intelligit.deleteBranches", { branches: selected });
+        void vscode.commands
+            .executeCommand("intelligit.deleteBranches", {
+                branches: selected,
+                repositoryRoot: getRepoRoot(),
+            })
+            .then(undefined, (error) => {
+                vscode.window.showErrorMessage(
+                    vscode.l10n.t("Branch action failed: {message}", {
+                        message: getErrorMessage(error),
+                    }),
+                );
+            });
     };
 
     /** Forwards only worktree actions whose path came from the latest trusted host snapshot. */

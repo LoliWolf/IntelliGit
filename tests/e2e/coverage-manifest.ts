@@ -137,7 +137,7 @@ const COMMAND_ENTRIES = [
         kind: "command",
         id: "intelligit.mergeIntoCurrent",
         mutating: true,
-        notCovered: COMMAND_NOT_COVERED,
+        coveredBySpec: "tests/e2e/branchRepositoryScope.spec.ts",
     },
     {
         kind: "command",

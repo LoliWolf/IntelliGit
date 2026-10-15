@@ -121,6 +121,11 @@ export class IntelliGitView {
         return this.frameOwning(GRAPH_PANEL_MARKER, timeoutMs);
     }
 
+    /** Returns the independent repository-scoped workbench after it opens in an editor tab. */
+    public async revealUndocked(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
+        return this.frameOwning('[data-testid="undocked-graph-section"]', timeoutMs);
+    }
+
     /** Returns the diff viewer's webview document. The caller triggers it first (for example,
      * clicking a changed-file row), since it opens as its own editor-tab panel rather than
      * docking inside the sidebar or graph panel. */

@@ -877,5 +877,9 @@
     "Discard recovery record": "復旧記録を破棄",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "選択したコミットは成功しましたが、選択メタデータの確認が必要です。コミットを再実行しないでください。",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "選択したコミットは反映されていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "選択した変更はステージされていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。"
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "選択した変更はステージされていませんが、選択メタデータを復元できませんでした。再試行する前に選択内容を確認してください。",
+    "The requested repository is no longer available. Select it again before running branch actions.": "要求されたリポジトリは利用できません。ブランチ操作の前に選択し直してください。",
+    "The selected branch is no longer available. Refresh the repository and try again.": "選択したブランチは利用できません。リポジトリを更新して再試行してください。",
+    "Branch action failed: {message}": "ブランチ操作に失敗しました: {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit はリモートワークスペースのホストで実行する必要があります。そのホストでインストールまたは有効化し、Git コマンドの前に remote.extensionKind の UI ホスト指定を削除してください。"
 }

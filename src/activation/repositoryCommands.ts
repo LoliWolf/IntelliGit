@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import { createBranchCommands } from "../commands/branchCommands";
+import { createBranchCommands, type BranchCommandEntry } from "../commands/branchCommands";
 import {
     BRANCH_COMMAND_FENCE_DECISIONS,
     rejectWhenOperationInProgress,
@@ -42,7 +42,7 @@ import {
     viewGitHubFileFromContext,
     viewGitHubPullRequestsFromContext,
 } from "../commands/githubContextCommands";
-import type { WorktreeService } from "../services/worktreeService";
+import { WorktreeService } from "../services/worktreeService";
 import {
     applySelectedCommitFileChange,
     compareCommitInfoFileWithLocal,
@@ -87,6 +87,7 @@ interface RepositoryCommandsDeps {
     setActiveRepository: (repository: DiscoveredRepository) => Promise<void>;
     clearSelection: (options?: { loading?: boolean }) => void;
     refreshActiveRepository: () => Promise<void>;
+    refreshRepository?: (repositoryRoot: string) => Promise<void>;
     refreshService: () => RefreshService;
     showUndockedGitLog: (options?: { deferDataLoad?: boolean }) => Promise<void>;
     pickUndockTargetAndOpen: () => Promise<void>;
@@ -619,6 +620,26 @@ function registerBranchCommands(deps: RepositoryCommandsDeps): void {
             vscode.commands.registerCommand(cmd.id, async (item: unknown) => {
                 // Update may wait on the fence and consent. Capture its complete ownership
                 // synchronously; rebuilding only this dispatch leaves other branch actions intact.
+                const explicitRoot =
+                    item && typeof item === "object" && "repositoryRoot" in item
+                        ? item.repositoryRoot
+                        : undefined;
+                const hasExplicitRoot =
+                    !!item && typeof item === "object" && "repositoryRoot" in item;
+                if (
+                    hasExplicitRoot &&
+                    (typeof explicitRoot !== "string" ||
+                        !explicitRoot ||
+                        !deps.isKnownRepositoryRoot(explicitRoot))
+                ) {
+                    throw new Error(
+                        vscode.l10n.t(
+                            "The requested repository is no longer available. Select it again before running branch actions.",
+                        ),
+                    );
+                }
+                if (hasExplicitRoot)
+                    return runScopedBranchCommand(deps, cmd.id, explicitRoot as string, item);
                 const repoRoot = deps.getRepoRoot();
                 const updateGitOps =
                     cmd.id === "intelligit.updateBranch"
@@ -661,6 +682,74 @@ function registerBranchCommands(deps: RepositoryCommandsDeps): void {
                 return (updateCommand ?? cmd).handler(validated);
             }),
         );
+    }
+}
+
+/** Resolves the originating panel's trusted root before any prompt, gate or Git mutation. */
+async function runScopedBranchCommand(
+    deps: RepositoryCommandsDeps,
+    commandId: string,
+    repositoryRoot: string,
+    item: object,
+): Promise<void> {
+    const executor = deps.executor.deriveFor(repositoryRoot);
+    const gitOps = deps.gitOps.deriveFor(repositoryRoot);
+    const worktrees = new WorktreeService(executor, () => repositoryRoot);
+    try {
+        if (
+            BRANCH_COMMAND_FENCE_DECISIONS[commandId] !== false &&
+            (await rejectWhenOperationInProgress(gitOps))
+        )
+            return;
+        const [branches] = await Promise.all([gitOps.getBranches(), worktrees.listWorktrees()]);
+        const currentBranches = worktrees.decorateBranches(branches);
+        const branchesByName = new Map(currentBranches.map((branch) => [branch.name, branch]));
+        const payload = item as {
+            branch?: Branch;
+            branches?: Array<Branch | string>;
+            branchNames?: string[];
+        };
+        const resolveBranch = (value: Branch | string): Branch => {
+            const name = typeof value === "string" ? value : value?.name;
+            const branch = branchesByName.get(name);
+            if (!branch)
+                throw new Error(
+                    vscode.l10n.t(
+                        "The selected branch is no longer available. Refresh the repository and try again.",
+                    ),
+                );
+            return branch;
+        };
+        const validated = {
+            ...(payload.branch ? { branch: resolveBranch(payload.branch) } : {}),
+            ...(payload.branches ? { branches: payload.branches.map(resolveBranch) } : {}),
+            ...(payload.branchNames
+                ? { branchNames: payload.branchNames.map((name) => resolveBranch(name).name) }
+                : {}),
+        };
+        const refresh = async (): Promise<void> => {
+            if (deps.refreshRepository) await deps.refreshRepository(repositoryRoot);
+            else if (areSameRepositoryRoot(repositoryRoot, deps.getRepoRoot()))
+                await deps.refreshActiveRepository();
+            else await deps.refreshService().refreshCommitPanels();
+        };
+        const commands: BranchCommandEntry[] = createBranchCommands({
+            executor,
+            gitOps,
+            getCurrentBranchName: () => currentBranches.find((branch) => branch.isCurrent)?.name,
+            getCurrentBranches: () => currentBranches,
+            createWorktree: (options) => worktrees.createWorktree(options).then(() => undefined),
+            openConflictSession: (labels = {}) =>
+                deps.openConflictSessionForRepository(gitOps, repositoryRoot, labels),
+            refreshConflictUi: async () => {
+                if (areSameRepositoryRoot(repositoryRoot, deps.getRepoRoot()))
+                    await deps.refreshService().refreshConflictUi();
+            },
+            refreshRepository: refresh,
+        });
+        await commands.find((command) => command.id === commandId)?.handler(validated);
+    } finally {
+        worktrees.dispose();
     }
 }
 

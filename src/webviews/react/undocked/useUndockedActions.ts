@@ -130,13 +130,30 @@ export function useUndockedActions(params: UseUndockedActionsParams): UndockedAc
         // react-doctor-disable-next-line react-doctor/exhaustive-deps
     }, []);
 
-    const handleBranchAction = useCallback((action: BranchAction, branchName: string) => {
-        vscode.postMessage({ type: "branchAction", action, branchName });
-    }, []);
+    const handleBranchAction = useCallback(
+        (action: BranchAction, branchName: string) => {
+            if (!selectedRepositoryRoot) return;
+            vscode.postMessage({
+                type: "branchAction",
+                action,
+                branchName,
+                repositoryRoot: selectedRepositoryRoot,
+            });
+        },
+        [selectedRepositoryRoot],
+    );
 
-    const handleDeleteBranches = useCallback((branches: Branch[]) => {
-        vscode.postMessage({ type: "deleteBranches", branches });
-    }, []);
+    const handleDeleteBranches = useCallback(
+        (branches: Branch[]) => {
+            if (!selectedRepositoryRoot) return;
+            vscode.postMessage({
+                type: "deleteBranches",
+                branches,
+                repositoryRoot: selectedRepositoryRoot,
+            });
+        },
+        [selectedRepositoryRoot],
+    );
 
     const handleWorktreeAction = useCallback((action: WorktreeAction, path: string) => {
         vscode.postMessage({ type: "worktreeAction", action, path });

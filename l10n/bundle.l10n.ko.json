@@ -877,5 +877,9 @@
     "Discard recovery record": "복구 기록 삭제",
     "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.": "선택한 커밋은 완료되었지만 선택 메타데이터를 검토해야 합니다. 커밋을 다시 실행하지 마세요.",
     "Selected commit was not published, but its selection metadata could not be restored. Review the selection before retrying.": "선택한 커밋은 반영되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요.",
-    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "선택한 변경 사항은 스테이징되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요."
+    "Selected changes were not staged, but their selection metadata could not be restored. Review the selection before retrying.": "선택한 변경 사항은 스테이징되지 않았지만 선택 메타데이터를 복원할 수 없습니다. 다시 시도하기 전에 선택 내용을 검토하세요.",
+    "The requested repository is no longer available. Select it again before running branch actions.": "요청한 저장소를 더 이상 사용할 수 없습니다. 브랜치 작업 전에 다시 선택하세요.",
+    "The selected branch is no longer available. Refresh the repository and try again.": "선택한 브랜치를 더 이상 사용할 수 없습니다. 저장소를 새로 고치고 다시 시도하세요.",
+    "Branch action failed: {message}": "브랜치 작업 실패: {message}",
+    "IntelliGit must run on the remote workspace host. Install or enable it there and remove any remote.extensionKind UI override before running Git commands.": "IntelliGit은 원격 작업 영역 호스트에서 실행해야 합니다. 해당 호스트에 설치하거나 활성화하고 Git 명령 전에 remote.extensionKind의 UI 호스트 강제 설정을 제거하세요."
 }
