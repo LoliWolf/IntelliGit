@@ -428,7 +428,10 @@ describe("IntelliGitView", () => {
      * a fake that clicked whatever it was handed would stay green through exactly the regression
      * the click target exists to prevent.
      */
-    function workbenchPage(webviews: readonly { outer: unknown }[]): {
+    function workbenchPage(
+        webviews: readonly { outer: unknown }[],
+        expanded = false,
+    ): {
         page: Page;
         click: ReturnType<typeof vi.fn>;
         emitConsole: (type: string, text: string, url: string) => void;
@@ -451,7 +454,15 @@ describe("IntelliGitView", () => {
                             expect(has, "activity-bar item filtered by something else").toBe(
                                 intelliGitLabel,
                             );
-                            return { first: () => ({ click }) };
+                            return {
+                                first: () => ({
+                                    click,
+                                    getAttribute: vi.fn(async (name: string) => {
+                                        expect(name).toBe("aria-expanded");
+                                        return String(expanded);
+                                    }),
+                                }),
+                            };
                         },
                     };
                 }
@@ -488,6 +499,23 @@ describe("IntelliGitView", () => {
         await new IntelliGitView(page).reveal();
 
         expect(click).toHaveBeenCalledOnce();
+    });
+
+    it("does not toggle the already-expanded sidebar closed", async () => {
+        const sidebar = webview([SIDEBAR_MARKER]);
+        const { page, click } = workbenchPage([sidebar], true);
+
+        await expect(new IntelliGitView(page).reveal()).resolves.toBe(sidebar.inner);
+
+        expect(click).not.toHaveBeenCalled();
+    });
+
+    it("waits for an expanded sidebar to render without toggling it", async () => {
+        const { page, click } = workbenchPage([], true);
+
+        await expect(new IntelliGitView(page).reveal(50)).rejects.toThrow("(none attached)");
+
+        expect(click).not.toHaveBeenCalled();
     });
 
     // The regression this exists for: `iframe.webview` elements are ordered by creation, so the

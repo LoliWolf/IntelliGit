@@ -107,11 +107,12 @@ export class IntelliGitView {
 
     /** Reveals IntelliGit in the sidebar and returns its webview document. */
     public async reveal(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
-        await this.page
+        const item = this.page
             .locator(ACTIVITY_BAR_ITEM)
             .filter({ has: this.page.getByLabel("IntelliGit", { exact: true }) })
-            .first()
-            .click();
+            .first();
+        // Reload can restore the open sidebar; clicking its active item may close it.
+        if ((await item.getAttribute("aria-expanded")) !== "true") await item.click();
         return this.frameOwning(SIDEBAR_MARKER, timeoutMs);
     }
 

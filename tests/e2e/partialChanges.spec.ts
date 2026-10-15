@@ -49,6 +49,38 @@ async function createList(page: Page, frame: FrameLocator, name: string): Promis
 test.describe("Selected changes and changelists", () => {
     test.use({ scenario: "clean" });
 
+    test("keeps the sidebar open when revealed twice", async ({ fixtureWorkspace }) => {
+        const { workspace } = fixtureWorkspace;
+        const app = await launchFixtureWorkspace({
+            executablePath: await resolveVSCodeExecutable(REPO_ROOT),
+            repoRoot: REPO_ROOT,
+            workspace,
+            channelDir: fixtureWorkspace.channelDir,
+            timeout: 60_000,
+        });
+        try {
+            const page = await app.firstWindow();
+            await dismissFirstRunDialogs(page);
+            await waitForE2eChannelReady(fixtureWorkspace.channelDir);
+            const view = new IntelliGitView(page);
+            const first = await view.reveal();
+            await first.getByTestId("commit-panel-tab-row").click();
+            const sidebar = await view.reveal();
+            await expect(sidebar.getByTestId("commit-panel-tab-row")).toBeVisible();
+            const item = page
+                .locator(".activitybar .action-item")
+                .filter({ has: page.getByLabel("IntelliGit", { exact: true }) });
+            await expect(item).toHaveAttribute("aria-expanded", "true");
+            await page.getByRole("button", { name: /^Toggle Primary Side Bar/ }).click();
+            await expect(item).toHaveAttribute("aria-expanded", "false");
+            const reopened = await view.reveal();
+            await expect(reopened.getByTestId("commit-panel-tab-row")).toBeVisible();
+            await expect(item).toHaveAttribute("aria-expanded", "true");
+        } finally {
+            await app.close();
+        }
+    });
+
     test("restores sidebar inclusion after native dirty-buffer staging refusal", async ({
         fixtureWorkspace,
     }) => {
@@ -206,7 +238,10 @@ test.describe("Selected changes and changelists", () => {
             await expect(
                 editor.getByRole("button", { name: "Assign selected", exact: true }),
             ).toBeEnabled();
-            await new Workbench(page).runCommand("Developer: Reload Window");
+            await Promise.all([
+                page.waitForEvent("domcontentloaded"),
+                new Workbench(page).runCommand("Developer: Reload Window"),
+            ]);
             view = new IntelliGitView(page);
             sidebar = await view.reveal();
             await expect(
