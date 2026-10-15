@@ -363,6 +363,10 @@ test("sideways selection crossing either clip edge paints only inside code", asy
     await wideLine(page);
     await clickVisibleWideLine(page);
     await page.keyboard.press("End");
+    // End schedules caret reveal after the key event. Let it finish before manually scrolling,
+    // otherwise the delayed reveal overwrites the requested midpoint with the line's far end.
+    await expectCaretInsideViewport(page);
+    await settleScroll(page, ".merge-horizontal-scroll", "scrollLeft");
     for (const key of ["End", "Home"]) {
         await scrollToFraction(page, 0.5);
         await clickVisibleWideLine(page);

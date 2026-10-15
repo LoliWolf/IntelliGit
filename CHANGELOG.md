@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-15
+
+This release delivers PR #333's changelist and selected-change foundation. Four follow-up phases remain planned and are not included in this release.
+
+### Added
+
+- Create, rename, delete and select worktree-scoped changelists, choose an active list, and assign files or selected lines while keeping ownership separate from commit inclusion.
+- Review full-file, syntax-highlighted changes in supported tracked text files and select added or deleted lines and blocks to stage, unstage or commit only the chosen changes. Changelists and selections persist across reloads.
+- Protect selected-change operations with repository, HEAD, index, working-file and unsaved-editor checks, isolated index transactions, and recoverable journals for interrupted publication. Selected commits preserve unrelated staged changes, run configured hooks and signing, and verify the resulting tree and parent before publication.
+
+### Changed
+
+- Large changed-file trees use virtualized rows to keep the commit panel responsive.
+
+### Fixed
+
+- Repository actions retain their originating repository across undocked windows and repository switches. Remote workspaces require the extension to run beside the remote Git repository.
+- End-to-end sidebar reveal uses an idempotent Show command across window restoration. Merge selection checks wait for caret reveal before setting their test scroll position.
+- Fixture validation records each real Git scenario within its own timeout budget while retaining complete missing-file and orphan checks on Windows and other platforms.
+
 ## [0.37.3] - 2026-10-13
 
 ### Fixed

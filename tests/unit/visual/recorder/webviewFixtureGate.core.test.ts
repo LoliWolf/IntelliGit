@@ -14,7 +14,7 @@
  *  - "fails ... when an orphaned fixture file exists" plants a lone file under an isolated scratch
  *    `repoRoot`, never the real repository, so this test can never itself leave a stray file
  *    behind for `git diff --stat tests/visual/fixtures/` to notice.
- *  - "passes on the current tree" is the gate's own real-world proof, and separately confirms
+ *  - "matches current ... recordings" is the gate's own real-world proof, and separately confirms
  *    `tests/visual/fixtures/host/` -- which certifiably holds files but no registry entry -- is
  *    never reported as an orphan.
  *  - "registers at least one recording" guards against the gate passing vacuously over an empty
@@ -55,6 +55,13 @@ import {
     throwingRegistryEntry,
 } from "./webviewFixtureGateTestHelpers";
 
+const RECORDING_SCENARIOS = [...new Set(WEBVIEW_FIXTURE_RECORDERS.map((entry) => entry.scenario))];
+const UPDATE_FIXTURES = process.env[UPDATE_WEBVIEW_FIXTURES_ENV_VAR] === "1";
+
+// Regenerate all scenarios together so an early partition cannot report a fixture that a later
+// partition has yet to create. Ordinary verification keeps one unchanged budget per scenario.
+const RECORDING_PARTITIONS = UPDATE_FIXTURES ? [undefined] : RECORDING_SCENARIOS;
+
 describe("runWebviewFixtureGate", () => {
     beforeEach(() => {
         setE2eControlChannelActive(true);
@@ -69,9 +76,9 @@ describe("runWebviewFixtureGate", () => {
         expect(WEBVIEW_FIXTURE_RECORDERS.length).toBeGreaterThan(0);
     });
 
-    it(
-        "passes on the current tree, and tests/visual/fixtures/host/ never trips it as an orphan",
-        async () => {
+    it.each(RECORDING_PARTITIONS)(
+        "matches current %s recordings, checks the complete registry, and excludes host fixtures",
+        async (recordScenario) => {
             // Sanity precondition: host/ genuinely holds files and genuinely has no registry entry
             // -- otherwise this test would pass even without the exclusion this file's own doc
             // comment and `webviewFixtureGate.ts`'s `NON_WEBVIEW_FIXTURE_DIRS` claim to provide.
@@ -81,21 +88,20 @@ describe("runWebviewFixtureGate", () => {
                 WEBVIEW_FIXTURE_RECORDERS.some((entry) => (entry.contextId as string) === "host"),
             ).toBe(false);
 
-            // The ONE call that runs against the real tree with the DEFAULT (real) `prepareScenario`
-            // -- and therefore the one that honors `UPDATE_WEBVIEW_FIXTURES=1` -- is what makes the
-            // command in `webviewFixtureGate.ts`'s doc comment (and in the gate's own findings) real
-            // rather than aspirational. In update mode this assertion is vacuously true, which is
-            // inherent to any regeneration path: the proof then lives in `git diff`, and in the plain
-            // rerun a developer does afterwards.
+            // Each distinct real Git scenario gets its own budget. Running all scenarios under
+            // one scenario's timeout exhausted it on Windows before recording could finish.
+            // Every registered recording still runs; registry/orphan checks use the full set.
+            // Regeneration remains explicit and its output must be reviewed in git diff.
             const findings = await runWebviewFixtureGate({
                 repoRoot: REPO_ROOT,
                 registry: WEBVIEW_FIXTURE_RECORDERS,
-                update: process.env[UPDATE_WEBVIEW_FIXTURES_ENV_VAR] === "1",
+                update: UPDATE_FIXTURES,
+                recordScenario,
             });
 
             expect(findings).toEqual([]);
         },
-        REAL_SCENARIO_TIMEOUT_MS,
+        REAL_SCENARIO_TIMEOUT_MS * (UPDATE_FIXTURES ? RECORDING_SCENARIOS.length : 1),
     );
 
     it(
@@ -124,6 +130,7 @@ describe("runWebviewFixtureGate", () => {
                 const findings = await runWebviewFixtureGate({
                     repoRoot: scratchRepoRoot,
                     registry: WEBVIEW_FIXTURE_RECORDERS,
+                    recordScenario: COMMIT_INFO_CLEAN_SCENARIO,
                 });
 
                 expect(findings).toHaveLength(1);
@@ -150,7 +157,11 @@ describe("runWebviewFixtureGate", () => {
             // no longer isolate the "missing" behavior this test exists to prove.
             const registry = [...WEBVIEW_FIXTURE_RECORDERS, throwingRegistryEntry("dirty")];
 
-            const findings = await runWebviewFixtureGate({ repoRoot: REPO_ROOT, registry });
+            const findings = await runWebviewFixtureGate({
+                repoRoot: REPO_ROOT,
+                registry,
+                recordScenario: COMMIT_INFO_CLEAN_SCENARIO,
+            });
 
             expect(findings).toHaveLength(1);
             expect(findings[0]).toMatchObject({

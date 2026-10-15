@@ -419,58 +419,24 @@ describe("IntelliGitView", () => {
         };
     }
 
-    /**
-     * A workbench holding the given webviews in DOM order, plus the activity-bar item.
-     *
-     * Only the two selectors the page object is supposed to use are served, and only the exact
-     * "IntelliGit" label is accepted as the filter. A page object that goes back to clicking the
-     * labelled anchor asks for a selector this fake does not model and gets a named failure --
-     * a fake that clicked whatever it was handed would stay green through exactly the regression
-     * the click target exists to prevent.
-     */
-    function workbenchPage(
-        webviews: readonly { outer: unknown }[],
-        expanded = false,
-    ): {
+    /** A workbench holding the given webviews, with the Show command as the native UI boundary. */
+    function workbenchPage(webviews: readonly { outer: unknown }[]): {
         page: Page;
-        click: ReturnType<typeof vi.fn>;
+        show: ReturnType<typeof vi.spyOn<Workbench, "runCommand">>;
         emitConsole: (type: string, text: string, url: string) => void;
     } {
-        const click = vi.fn();
+        const show = vi.spyOn(Workbench.prototype, "runCommand").mockResolvedValue(undefined);
         // The page object attaches `console`/`pageerror` listeners in its constructor. Modelling
         // `on` as a real registry rather than a no-op is what lets the tests below DRIVE the
         // console instrument; a no-op fake would merely tolerate it, and an instrument nothing
         // feeds is the one thing a report about a silent page must not be.
         const listeners = new Map<string, ((payload: never) => void)[]>();
-        const intelliGitLabel = Symbol("getByLabel(IntelliGit, { exact: true })");
         const page = {
             locator: (selector: string) => {
                 if (selector === "iframe.webview") {
                     return { all: () => Promise.resolve(webviews.map((view) => view.outer)) };
                 }
-                if (selector === ".activitybar .action-item") {
-                    return {
-                        filter: ({ has }: { has: unknown }) => {
-                            expect(has, "activity-bar item filtered by something else").toBe(
-                                intelliGitLabel,
-                            );
-                            return {
-                                first: () => ({
-                                    click,
-                                    getAttribute: vi.fn(async (name: string) => {
-                                        expect(name).toBe("aria-expanded");
-                                        return String(expanded);
-                                    }),
-                                }),
-                            };
-                        },
-                    };
-                }
                 throw new Error(`page object asked for an unmodelled locator: ${selector}`);
-            },
-            getByLabel: (name: string, options?: { exact?: boolean }) => {
-                expect([name, options?.exact]).toEqual(["IntelliGit", true]);
-                return intelliGitLabel;
             },
             waitForTimeout: vi.fn().mockResolvedValue(undefined),
             on: (event: string, listener: (payload: never) => void) => {
@@ -486,36 +452,40 @@ describe("IntelliGitView", () => {
                 });
             }
         };
-        return { page, click, emitConsole };
+        return { page, show, emitConsole };
     }
 
-    // VS Code renders a view's badge as a sibling of the labelled anchor, overlapping it, so an
-    // anchor-targeted click dies as `<div class="badge" ...> intercepts pointer events` and burns
-    // the full timeout -- but only on a launch where the changed-file count lands before the click,
-    // which is why it read as a rare dead activity-bar item rather than a selector fault.
-    it("clicks the activity-bar item, so the view's own badge cannot intercept it", async () => {
-        const { page, click } = workbenchPage([webview([SIDEBAR_MARKER])]);
-
-        await new IntelliGitView(page).reveal();
-
-        expect(click).toHaveBeenCalledOnce();
-    });
-
-    it("does not toggle the already-expanded sidebar closed", async () => {
+    it("waits for Show IntelliGit to finish before finding the sidebar", async () => {
         const sidebar = webview([SIDEBAR_MARKER]);
-        const { page, click } = workbenchPage([sidebar], true);
+        const webviews: { outer: unknown }[] = [];
+        const { page, show } = workbenchPage(webviews);
+        show.mockImplementation(async () => {
+            await Promise.resolve();
+            webviews.push(sidebar);
+        });
 
         await expect(new IntelliGitView(page).reveal()).resolves.toBe(sidebar.inner);
 
-        expect(click).not.toHaveBeenCalled();
+        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
     });
 
-    it("waits for an expanded sidebar to render without toggling it", async () => {
-        const { page, click } = workbenchPage([], true);
+    it("uses the idempotent Show command again when the sidebar is already open", async () => {
+        const sidebar = webview([SIDEBAR_MARKER]);
+        const { page, show } = workbenchPage([sidebar]);
+        const view = new IntelliGitView(page);
+
+        await expect(view.reveal()).resolves.toBe(sidebar.inner);
+        await expect(view.reveal()).resolves.toBe(sidebar.inner);
+
+        expect(show.mock.calls).toEqual([["View: Show IntelliGit"], ["View: Show IntelliGit"]]);
+    });
+
+    it("reports a sidebar that still has no attached webview after the Show command", async () => {
+        const { page, show } = workbenchPage([]);
 
         await expect(new IntelliGitView(page).reveal(50)).rejects.toThrow("(none attached)");
 
-        expect(click).not.toHaveBeenCalled();
+        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
     });
 
     // The regression this exists for: `iframe.webview` elements are ordered by creation, so the
@@ -524,12 +494,12 @@ describe("IntelliGitView", () => {
     it("resolves each surface by what it renders, not by DOM order", async () => {
         const graphPanel = webview([GRAPH_PANEL_MARKER]);
         const sidebar = webview([SIDEBAR_MARKER]);
-        const { page, click } = workbenchPage([graphPanel, sidebar]);
+        const { page, show } = workbenchPage([graphPanel, sidebar]);
         const view = new IntelliGitView(page);
 
         await expect(view.reveal()).resolves.toBe(sidebar.inner);
         await expect(view.revealPanel()).resolves.toBe(graphPanel.inner);
-        expect(click).toHaveBeenCalledOnce();
+        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
     });
 
     it("skips a webview whose document is unreachable instead of failing on it", async () => {
