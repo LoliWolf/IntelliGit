@@ -33,9 +33,8 @@ import { runGitOperationFromPanel } from "../views/commitPanelActions";
 /**
  * Runtime services captured by branch context-menu command handlers.
  *
- * Callbacks target the branch tree's repository. Update dispatches supply captured services and
- * snapshots before the operation fence, so consent and conflict callbacks cannot follow a later
- * active-repository change. Other commands retain their existing live snapshot providers.
+ * Registrations capture services and branch snapshots before an operation fence or prompt,
+ * so consent, publishing and conflict callbacks cannot follow a later repository selection.
  */
 export interface BranchCommandDeps {
     executor: GitExecutor;
@@ -50,6 +49,8 @@ export interface BranchCommandDeps {
     refreshConflictUi: () => Promise<void>;
     /** Refreshes the repository captured for an Update command, even after a selection change. */
     refreshRepository?: () => Promise<void>;
+    /** Publishes the branch in the repository captured by the originating host. */
+    publishBranch?: () => Promise<void>;
 }
 
 /**
@@ -799,7 +800,8 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 if (!validateBranchArg(branch.name)) return;
                 const tracked = resolveTrackedRemoteBranch(branch, getCurrentBranches());
                 if (!tracked && branch.isCurrent) {
-                    await vscode.commands.executeCommand("intelligit.publishBranch");
+                    await (deps.publishBranch?.() ??
+                        vscode.commands.executeCommand("intelligit.publishBranch"));
                     return;
                 }
                 const fallbackRemote = !tracked

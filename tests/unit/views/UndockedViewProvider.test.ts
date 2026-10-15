@@ -232,6 +232,41 @@ function attachPostedMessageRecorder(panel: FakeWebviewPanel): unknown[] {
     return posted;
 }
 
+describe("UndockedViewProvider addressed mutations", () => {
+    it.each([
+        { type: "push" },
+        { type: "pull" },
+        { type: "fetch" },
+        { type: "sync" },
+        { type: "publishBranch" },
+        { type: "commitSelected", message: "late", paths: ["same.txt"], amend: false, push: false },
+        { type: "worktreeAction", action: "lock", path: "/linked" },
+        { type: "commitAction", action: "revertCommit", hash: "a".repeat(40) },
+    ])("refuses stale $type requests instead of retargeting B", async (message) => {
+        const { provider, gitOps } = createBridgeProvider("/repo-b", [
+            { root: "/repo-a", label: "A", kind: "repository" },
+            { root: "/repo-b", label: "B", kind: "repository" },
+        ]);
+        const mutation = vi.fn();
+        const spy = vi.spyOn(gitOps, "deriveFor").mockReturnValue({
+            push: mutation,
+            pullRebase: mutation,
+            fetch: mutation,
+            commit: mutation,
+        } as never);
+        const panel = openTestPanel(provider);
+        try {
+            await expect(
+                panel.receiveMessage({ ...message, repositoryRoot: "/repo-a" }),
+            ).rejects.toThrow("The requested repository is no longer available.");
+            expect(mutation).not.toHaveBeenCalled();
+        } finally {
+            spy.mockRestore();
+            provider.dispose();
+        }
+    });
+});
+
 describe("UndockedViewProvider commit-detail re-post on webview reload", () => {
     it(
         "re-posts the selected commit detail when `ready` fires again without a new panel, even " +

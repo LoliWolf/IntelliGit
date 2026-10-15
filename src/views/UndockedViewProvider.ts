@@ -264,6 +264,7 @@ export class UndockedViewProvider {
     private readonly _onWorktreeAction = new vscode.EventEmitter<{
         action: WorktreeAction;
         path: string;
+        repositoryRoot: string;
     }>();
     readonly onWorktreeAction = this._onWorktreeAction.event;
     private readonly _onCommitAction = new vscode.EventEmitter<{
@@ -818,9 +819,10 @@ export class UndockedViewProvider {
         mutation: StashMutation,
         requestIdValue: unknown,
     ): Promise<void> {
+        const root = this.selectedRepositoryRoot;
         return executeStashMutationRequest(
             {
-                gitOps: this.gitOps,
+                gitOps: this.gitOps.deriveFor(root),
                 refreshData: () => this.refreshCommitPanelData(),
                 fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
             },
@@ -934,9 +936,10 @@ export class UndockedViewProvider {
 
     /** Runs a correlated single-file stash request for the active undocked repository. */
     private runStashFileMutationRequest(message: Record<string, unknown>): Promise<void> {
+        const root = this.selectedRepositoryRoot;
         return executeStashFileMutationRequest(
             {
-                gitOps: this.gitOps,
+                gitOps: this.gitOps.deriveFor(root),
                 refreshData: () => this.refreshCommitPanelData(),
                 fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
             },
@@ -959,14 +962,7 @@ export class UndockedViewProvider {
                     canRefresh()
                         ? this.refreshCommitPanelData(false, canRefresh)
                         : Promise.resolve(),
-                refreshGraphData: async () => {
-                    if (!canRefresh()) return;
-                    await this.sendBranches(canRefresh);
-                    if (!canRefresh()) return;
-                    await this.loadInitial(canRefresh);
-                    if (!canRefresh()) return;
-                    this.postCommitDetailState();
-                },
+                refreshGraphData: () => this.refreshGraphForRequest(canRefresh),
                 fireWorkingTreeChanged: () => {
                     if (canRefresh()) this._onDidChangeWorkingTree.fire();
                 },
@@ -975,10 +971,35 @@ export class UndockedViewProvider {
         );
     }
 
-    /** Rejects branch messages from a retired repository render without falling back to another root. */
+    /** Keeps graph refreshes from an old request out of a newly selected repository. */
+    private async refreshGraphForRequest(canRefresh: () => boolean): Promise<void> {
+        if (!canRefresh()) return;
+        await this.sendBranches(canRefresh);
+        if (!canRefresh()) return;
+        await this.loadInitial(canRefresh);
+        if (canRefresh()) this.postCommitDetailState();
+    }
+
+    /** Rejects addressed actions from a retired render without discarding late draft storage. */
     private assertBranchMessageRoot(msg: UnifiedOutbound, root: string): void {
-        if (msg.type !== "branchAction" && msg.type !== "deleteBranches") return;
-        if (msg.repositoryRoot !== root || !this.findRepository(msg.repositoryRoot)) {
+        const requiresRoot = [
+            "branchAction",
+            "deleteBranches",
+            "worktreeAction",
+            "commitAction",
+        ].includes(msg.type);
+        if (
+            [
+                "selectRepository",
+                "saveCommitDraft",
+                "generateCommitMessage",
+                "cancelCommitMessageGeneration",
+            ].includes(msg.type) ||
+            (!requiresRoot && !("repositoryRoot" in msg))
+        )
+            return;
+        const requested = "repositoryRoot" in msg ? msg.repositoryRoot : undefined;
+        if (requested !== root || !this.findRepository(requested)) {
             throw new Error(
                 vscode.l10n.t(
                     "The requested repository is no longer available. Select it again before running branch actions.",
@@ -989,34 +1010,53 @@ export class UndockedViewProvider {
 
     /** Dispatches validated webview actions, routing Pull through a captured repository facade. */
     private async handleMessage(msg: UnifiedOutbound): Promise<void> {
+        switch (msg.type) {
+            case "generateCommitMessage":
+                this.handleGenerateCommitMessage(msg);
+                return;
+            case "cancelCommitMessageGeneration":
+                this.handleCancelCommitMessageGeneration(msg);
+                return;
+            default:
+                return this.handleRepositoryMessage(msg);
+        }
+    }
+
+    /** Keeps bounded generation validation separate from repository facade construction. */
+    private async handleRepositoryMessage(
+        msg: Exclude<
+            UnifiedOutbound,
+            { type: "generateCommitMessage" | "cancelCommitMessageGeneration" }
+        >,
+    ): Promise<void> {
         const commitRepositoryRoot = this.repoRootUri.fsPath;
+        const rootUri = this.repoRootUri;
+        const requestSequence = this.repositorySwitchSeq;
+        const canRefresh = () =>
+            commitRepositoryRoot === this.selectedRepositoryRoot &&
+            requestSequence === this.repositorySwitchSeq;
         const commitDraftStorageKey = this.getCommitDraftStorageKey();
         this.assertBranchMessageRoot(msg, commitRepositoryRoot);
+        const rootGitOps = this.gitOps.deriveFor(commitRepositoryRoot);
         const actionDeps = {
-            gitOps: this.gitOps,
-            refreshData: () => this.refreshCommitPanelData(),
-            refreshGraphData: async () => {
-                await this.sendBranches();
-                await this.loadInitial();
-                this.postCommitDetailState();
+            gitOps: rootGitOps,
+            refreshData: () =>
+                canRefresh() ? this.refreshCommitPanelData(false, canRefresh) : Promise.resolve(),
+            refreshGraphData: () => this.refreshGraphForRequest(canRefresh),
+            fireWorkingTreeChanged: () => {
+                if (canRefresh()) this._onDidChangeWorkingTree.fire();
             },
-            fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
             postCommitted: () => this.deliverCommitted(commitRepositoryRoot, commitDraftStorageKey),
             maybeOfferPublishBranch: () => Promise.resolve(),
         };
         const fileActionDeps = {
-            gitOps: this.gitOps,
-            getWorkspaceRoot: () => this.repoRootUri,
-            refreshData: () => this.refreshCommitPanelData(),
-            fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
+            gitOps: rootGitOps,
+            getWorkspaceRoot: () => rootUri,
+            refreshData: actionDeps.refreshData,
+            fireWorkingTreeChanged: actionDeps.fireWorkingTreeChanged,
         };
+        const publishBranch = () => publishBranchFromPanel(fileActionDeps);
         switch (msg.type) {
-            case "generateCommitMessage":
-                this.handleGenerateCommitMessage(msg);
-                break;
-            case "cancelCommitMessageGeneration":
-                this.handleCancelCommitMessageGeneration(msg);
-                break;
             // Graph-side
             case "ready":
                 // A fresh webview context has received nothing, so any commit-detail post made
@@ -1096,6 +1136,7 @@ export class UndockedViewProvider {
                 this._onWorktreeAction.fire({
                     action: msg.action,
                     path: assertString(msg.path, "path"),
+                    repositoryRoot: commitRepositoryRoot,
                 });
                 break;
             case "commitAction":
@@ -1198,7 +1239,7 @@ export class UndockedViewProvider {
                 break;
             case "abortMerge":
                 await abortMergeWithConfirmation({
-                    gitOps: this.gitOps,
+                    gitOps: rootGitOps,
                     onConflictStateChanged: async () => {
                         await Promise.all([
                             this.refreshCommitPanelData(false),
@@ -1238,7 +1279,7 @@ export class UndockedViewProvider {
                 const message = (typeof msg.message === "string" ? msg.message : "").trim();
                 await this.runCommitActionWithLease(commitRepositoryRoot, (rootGitOps) =>
                     commitSelectedFromPanel(
-                        { ...actionDeps, gitOps: rootGitOps },
+                        { ...actionDeps, gitOps: rootGitOps, publishBranch },
                         {
                             message,
                             amend: msg.amend === true,
@@ -1264,7 +1305,7 @@ export class UndockedViewProvider {
                 const message = (typeof msg.message === "string" ? msg.message : "").trim();
                 await this.runCommitActionWithLease(commitRepositoryRoot, (rootGitOps) =>
                     commitAndPushFromPanel(
-                        { ...actionDeps, gitOps: rootGitOps },
+                        { ...actionDeps, gitOps: rootGitOps, publishBranch },
                         message,
                         msg.amend === true,
                     ),
@@ -1276,14 +1317,11 @@ export class UndockedViewProvider {
                 break;
             case "fetch":
             case "sync":
-                await runGitOperationFromPanel(
-                    { ...actionDeps, gitOps: this.gitOps.deriveFor(commitRepositoryRoot) },
-                    msg.type,
-                );
+                await runGitOperationFromPanel({ ...actionDeps, publishBranch }, msg.type);
                 break;
             case "push":
                 await runGitOperationFromPanel(
-                    { ...actionDeps, gitOps: this.gitOps.deriveFor(commitRepositoryRoot) },
+                    { ...actionDeps, publishBranch },
                     "push",
                     msg.force === true,
                 );

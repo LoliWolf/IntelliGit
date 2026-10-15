@@ -18,8 +18,9 @@ Previously, its branch menu forwarded only the branch object to global commands,
 which used A's executor. An already-up-to-date pull or already-contained merge in
 A could succeed while B remained unchanged.
 
-Branch and bulk-delete messages now identify the repository that rendered their
-rows. The host rejects stale, missing or unavailable roots instead of substituting
+Branch, bulk-delete, commit-action and worktree messages identify the repository
+that rendered their rows. Addressed mutation callbacks retain their rendered
+root; the host rejects stale, missing or unavailable roots instead of substituting
 the current selection. Dispatch captures repository-bound Git services, reloads
 the branch/worktree inventory, retains the operation fence and routes completion
 refreshes and conflicts back to that repository. Names absent from the captured
@@ -32,8 +33,49 @@ an unavailable worktree inventory is not substituted with an empty safe list.
 
 Undocked Fetch, Push and Sync also derive their Git facade before waiting for
 progress or consent. Pull retains its existing captured-root update transaction.
+Publish, including first Push on an unpublished branch, carries the same root
+through the native command and credential flow. Native branch commands also
+capture their services before an operation fence or prompt. Worktree services
+are owned by one command and disposed after its captured-root refresh.
+Tracked file rows carry repository metadata in native context menus, so
+Rollback, Delete and Stash do not silently use the global repository. Stash
+conflicts open the conflict session for the repository actually changed.
 No Git error is converted into success, and no history, index, worktree or
 partial-commit safety limit is relaxed.
+
+## Execution and Mutation Destinations
+
+Execution on the SSH machine does not mean every action changes its checked-out
+files. Ordinary Git runs through the workspace-host `GitExecutor`; authenticated
+clone/publish uses that host's askpass process. The interactive terminal rebase
+fallback is user-controlled and does not observe completion.
+
+| Operation | Intended mutation | Expanded physical SSH assertion |
+| --- | --- | --- |
+| Log, Diff, Status | Read repository state; no working-tree or branch-content update | Host dispatch audit, not a claim of writes |
+| Fetch | Update SSH checkout's remote-tracking refs | Tracking ref advances, checkout HEAD stays unchanged |
+| Pull, Update, Merge | Integrate into the addressed SSH checkout | B's expected HEAD/content changes; A stays unchanged |
+| Commit | Update SSH checkout's commit/ref and index | Both undocked B and sidebar B create the intended commit while global A stays active |
+| Push | Send commits to the configured Git remote | Read B's bare origin ref and committed blob, not only B's tracking ref or a success toast |
+| Sync | Integrate incoming commits and push local commits | Both incoming and rebased local content reach B's origin |
+| New Branch, Publish, Checkout | Change B's branch and create its remote ref | New unpublished B branch appears only in B's origin, then B checks out main |
+| Stash, Pop, Rollback | Change B's stash/index/working tree | B's bytes and stash state change; A and A's origin remain unchanged |
+| Native file-row Rollback | Restore the repository named by the row | Sidebar B restores its file while global A stays active |
+| Worktree Lock, Unlock, Delete | Change the addressed repository's worktree metadata/directory | B's detached owned worktree changes; A stays unchanged |
+| Rejected Push | Report failure without losing the local commit or changing the server ref | Real owned pre-receive hook refuses; error is visible and no new push-success message appears |
+
+The expanded opt-in case uses separate disposable bare origins for A and B.
+After fixture preparation it compares unrelated A's HEAD, branch refs, logical
+index, status, working-file bytes and origin refs throughout the operations.
+This is one scenario with multiple assertions, not an exhaustive certification
+of every command/configuration combination.
+
+File-row Delete/Stash, worktree Move/Prune/Repair and selection changes during
+prompts have focused unit coverage. Partial transactions, advanced history
+rewrites, conflict recovery, hosted Git authentication, signing, alternate
+platforms and manual terminal sessions still require their own specific
+validation. A legitimate already-up-to-date operation can succeed without a
+content change, and server permissions or hooks can refuse a push.
 
 ## Verification
 
@@ -97,6 +139,17 @@ and server 1.132.0 and a compatible Remote-SSH 0.124.0. The installed run had no
 development-path flag and checked all four operation paths. Owned project and
 server-process counts returned to zero; existing projects and the original
 server installation were unchanged.
+
+On October 16, 2026, the expanded installed-production scenario passed on the
+same client/server versions with retries disabled. It additionally checked
+tracking-only Fetch, undocked and sidebar Commit/Push into a separate bare
+origin, bidirectional Sync, native file-row Rollback, Stash/Pop/Rollback,
+New Branch/Publish/Checkout and worktree Lock/Unlock/Delete. A real pre-receive
+hook rejected the final Push: the error appeared, the origin ref stayed
+unchanged, the local commit survived and no new push-success notification
+appeared. Unrelated A and its origin remained unchanged after fixture
+preparation. Owned remote projects, server processes and local client profiles
+returned to zero.
 
 Earlier automatic-download attempts remained unverified and are not relabeled
 passing. The later successful runs used an exact-build server seed. The fixtures

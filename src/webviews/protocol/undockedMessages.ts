@@ -148,6 +148,8 @@ type GraphOutbound =
     | {
           /** Command requesting a worktree row action on the host side. */
           type: "worktreeAction";
+          /** Repository that supplied the rendered worktree row. */
+          repositoryRoot: string;
           /** Validated against shared worktree action values before command dispatch. */
           action: WorktreeAction;
           /** Absolute worktree path from the latest trusted host snapshot. */
@@ -156,6 +158,8 @@ type GraphOutbound =
     | {
           /** Command requesting a commit context-menu action on the host side. */
           type: "commitAction";
+          /** Repository that supplied the rendered commit row. */
+          repositoryRoot: string;
           /** Validated against shared commit action values before Git action dispatch. */
           action: CommitAction;
           /** Full Git object ID for the targeted commit. */

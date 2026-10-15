@@ -107,6 +107,7 @@ function makeGitOps(upstream?: string): GitOps {
         stashDelete: vi.fn(async () => ""),
         stashClear: vi.fn(async () => ""),
         getConflictFilesDetailed: vi.fn(async () => []),
+        getRepositoryRoot: vi.fn(async () => "/repo-b"),
     } as unknown as GitOps;
 }
 
@@ -925,6 +926,7 @@ describe("executeStashMutationRequest", () => {
 
         expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
             "intelligit.openConflictSession",
+            { repositoryRoot: "/repo-b" },
         );
         expect(deps.refreshData).toHaveBeenCalledOnce();
         expect(deps.fireWorkingTreeChanged).toHaveBeenCalledOnce();

@@ -140,7 +140,8 @@ export async function trackUnversionedFilesFromPanel(
  * have changed and notifies listeners that working-tree metadata should be re-read.
  */
 export async function publishBranchFromPanel(deps: PanelFileActionDeps): Promise<void> {
-    await vscode.commands.executeCommand("intelligit.publishBranch");
+    const root = deps.getWorkspaceRoot().fsPath;
+    await vscode.commands.executeCommand("intelligit.publishBranch", root);
     await deps.refreshData();
     deps.fireWorkingTreeChanged();
 }

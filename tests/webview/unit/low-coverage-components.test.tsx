@@ -59,13 +59,20 @@ describe("low coverage components", () => {
             ],
         };
 
-        const { root, container } = mount(<CommitInfoPane detail={detail} />);
+        const { root, container } = mount(
+            <CommitInfoPane detail={detail} repositoryRoot="/repo-b" />,
+        );
         const changedFilesHeader = Array.from(container.querySelectorAll('[role="button"]')).find(
             (element) => element.textContent?.includes("Changed Files"),
         );
 
         expect(changedFilesHeader?.textContent).toContain("+7");
         expect(changedFilesHeader?.textContent).toContain("-1");
+        const contexts = Array.from(container.querySelectorAll("[data-vscode-context]"))
+            .map((element) => JSON.parse(element.getAttribute("data-vscode-context")!))
+            .filter((context) => context.webviewSection === "commitInfoFile");
+        expect(contexts).toHaveLength(2);
+        for (const context of contexts) expect(context.repositoryRoot).toBe("/repo-b");
 
         unmount(root, container);
     });

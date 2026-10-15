@@ -204,9 +204,8 @@ function FileSection({
                 vscodeContext: JSON.stringify({
                     webviewSection: "file",
                     filePath: file.path,
-                    ...(repositoryRoot && filePaths.length > 0
-                        ? { repositoryRoot, filePaths }
-                        : {}),
+                    ...(repositoryRoot ? { repositoryRoot } : {}),
+                    ...(repositoryRoot && filePaths.length > 0 ? { filePaths } : {}),
                     webviewUnversionedFile: Boolean(repositoryRoot) && file.status === "?",
                     webviewIgnoredFile: file.status === "!",
                     preventDefaultContextMenuItems: true,

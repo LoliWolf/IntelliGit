@@ -128,6 +128,7 @@ export interface UndockedLayoutProps {
  */
 // react-doctor-disable-next-line react-doctor/no-giant-component, react-doctor/no-high-complexity-react-function -- The undocked layout intentionally orchestrates all split-pane props and handlers at one render boundary.
 export function UndockedLayout(props: UndockedLayoutProps): React.ReactElement {
+    const repositoryRoot = props.selectedRepositoryRoot ?? undefined;
     const {
         iconFonts,
         cpState,
@@ -255,7 +256,7 @@ export function UndockedLayout(props: UndockedLayoutProps): React.ReactElement {
                         <>
                             <CommitPanelPane
                                 width={commitPanelWidth ?? 0}
-                                repositoryRoot={selectedRepositoryRoot ?? undefined}
+                                repositoryRoot={repositoryRoot}
                                 cpState={cpState}
                                 checkedPaths={checkedPaths}
                                 onToggleFile={toggleFile}
@@ -430,6 +431,7 @@ export function UndockedLayout(props: UndockedLayoutProps): React.ReactElement {
                                         }}
                                     >
                                         <CommitInfoPane
+                                            repositoryRoot={repositoryRoot}
                                             detail={selectedDetail}
                                             loading={commitDetailLoading}
                                             hasSelection={selectedHash !== null}
@@ -468,7 +470,7 @@ export function UndockedLayout(props: UndockedLayoutProps): React.ReactElement {
 
                             <CommitPanelPane
                                 width={commitPanelWidth ?? 0}
-                                repositoryRoot={selectedRepositoryRoot ?? undefined}
+                                repositoryRoot={repositoryRoot}
                                 cpState={cpState}
                                 checkedPaths={checkedPaths}
                                 onToggleFile={toggleFile}

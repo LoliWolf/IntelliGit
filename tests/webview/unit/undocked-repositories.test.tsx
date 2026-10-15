@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 describe("undocked repository selector", () => {
-    it("tags branch messages with the repository that rendered their callbacks", async () => {
+    it("tags mutation messages with the repository that rendered their callbacks", async () => {
         vi.doMock("../../../src/webviews/react/shared/vscodeApi", () => ({
             getVsCodeApi: () => ({ postMessage }),
         }));
@@ -114,6 +114,23 @@ describe("undocked repository selector", () => {
             branchName: "main",
             repositoryRoot: "/repo-a",
         });
+        for (const [source, repositoryRoot] of [
+            [old, "/repo-a"],
+            [actions!, "/repo-b"],
+        ] as const) {
+            postMessage.mockClear();
+            source.handleWorktreeAction("lock", "/linked");
+            source.handleCommitAction("revertCommit", "a".repeat(40));
+            source.handleCommit();
+            source.handlePush();
+            source.handleForcePush();
+            source.handleFetch();
+            source.handlePull();
+            source.handleSync();
+            expect(postMessage).toHaveBeenCalledTimes(8);
+            for (const [message] of postMessage.mock.calls)
+                expect(message).toMatchObject({ repositoryRoot });
+        }
     });
 
     it("renders known repositories and emits the selected root", async () => {

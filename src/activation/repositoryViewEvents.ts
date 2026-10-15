@@ -278,7 +278,10 @@ export function registerRepositoryViewEvents(
             });
             return;
         }
-        void vscode.commands.executeCommand(`intelligit.worktree.${action}`, worktree);
+        void vscode.commands.executeCommand(`intelligit.worktree.${action}`, {
+            ...worktree,
+            repositoryRoot: getRepoRoot(),
+        });
     };
 
     /**
@@ -295,14 +298,15 @@ export function registerRepositoryViewEvents(
             ) => boolean,
         ) =>
         async ({ action, hash }: { action: CommitAction; hash: string }): Promise<void> => {
+            const root = getRepoRoot();
             try {
                 await handleCommitContextAction({
                     action,
                     hash,
-                    executor,
-                    gitOps,
+                    executor: executor.deriveFor(root),
+                    gitOps: gitOps.deriveFor(root),
                     mutationGate,
-                    repoRoot: getRepoRoot(),
+                    repoRoot: root,
                     currentBranches: getCurrentBranches(),
                     refreshAll: () => refreshService().refreshAll(),
                     originProvider,

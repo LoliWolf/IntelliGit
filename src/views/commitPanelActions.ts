@@ -982,8 +982,8 @@ export async function runGitOperationFromPanel(
         }
     }
 
-    // Only a plain push carries the force flag: `fetch` never writes, and `pull`/`sync` rebase onto
-    // the remote rather than overwrite it, so forcing them would mean something never asked for.
+    // Only push carries the force flag: fetch updates tracking refs, while pull/sync integrate
+    // remote commits rather than request a remote history rewrite.
     const forcePush = force && operation === "push";
     if (forcePush && !(await confirmForcePush())) return;
 
@@ -1116,7 +1116,8 @@ async function runStashMutationWithConflicts(
     } catch (err) {
         const conflicts = await deps.gitOps.getConflictFilesDetailed();
         if (conflicts.length === 0) throw err;
-        await vscode.commands.executeCommand("intelligit.openConflictSession");
+        const repositoryRoot = await deps.gitOps.getRepositoryRoot();
+        await vscode.commands.executeCommand("intelligit.openConflictSession", { repositoryRoot });
         return true;
     }
 }

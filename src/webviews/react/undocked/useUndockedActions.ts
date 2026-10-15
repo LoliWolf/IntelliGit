@@ -155,13 +155,31 @@ export function useUndockedActions(params: UseUndockedActionsParams): UndockedAc
         [selectedRepositoryRoot],
     );
 
-    const handleWorktreeAction = useCallback((action: WorktreeAction, path: string) => {
-        vscode.postMessage({ type: "worktreeAction", action, path });
-    }, []);
+    const handleWorktreeAction = useCallback(
+        (action: WorktreeAction, path: string) => {
+            if (!selectedRepositoryRoot) return;
+            vscode.postMessage({
+                type: "worktreeAction",
+                action,
+                path,
+                repositoryRoot: selectedRepositoryRoot,
+            });
+        },
+        [selectedRepositoryRoot],
+    );
 
-    const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
-        vscode.postMessage({ type: "commitAction", action, hash });
-    }, []);
+    const handleCommitAction = useCallback(
+        (action: CommitAction, hash: string) => {
+            if (!selectedRepositoryRoot) return;
+            vscode.postMessage({
+                type: "commitAction",
+                action,
+                hash,
+                repositoryRoot: selectedRepositoryRoot,
+            });
+        },
+        [selectedRepositoryRoot],
+    );
 
     const handleOpenDiff = useCallback((commitHash: string, filePath: string) => {
         vscode.postMessage({ type: "openCommitFileDiff", commitHash, filePath });
@@ -263,40 +281,57 @@ export function useUndockedActions(params: UseUndockedActionsParams): UndockedAc
     }, [generation, selectedRepositoryRoot]);
 
     const handleCommit = useCallback(() => {
-        if (generation.status !== "idle" || (isAmend && !hasCommits)) return;
+        if (!selectedRepositoryRoot || generation.status !== "idle" || (isAmend && !hasCommits))
+            return;
         const msg = commitMessage.trim();
         vscode.postMessage({
             type: "commitSelected",
+            repositoryRoot: selectedRepositoryRoot,
             message: msg,
             amend: isAmend,
             push: false,
             paths: Array.from(checkedPaths),
         });
-    }, [checkedPaths, commitMessage, generation.status, hasCommits, isAmend]);
+    }, [
+        checkedPaths,
+        commitMessage,
+        generation.status,
+        hasCommits,
+        isAmend,
+        selectedRepositoryRoot,
+    ]);
 
     const handlePush = useCallback(() => {
-        vscode.postMessage({ type: shouldPublishBranch ? "publishBranch" : "push" });
-    }, [shouldPublishBranch]);
+        if (!selectedRepositoryRoot) return;
+        vscode.postMessage({
+            type: shouldPublishBranch ? "publishBranch" : "push",
+            repositoryRoot: selectedRepositoryRoot,
+        });
+    }, [shouldPublishBranch, selectedRepositoryRoot]);
 
     const handleForcePush = useCallback(() => {
-        vscode.postMessage({ type: "push", force: true });
-    }, []);
+        if (!selectedRepositoryRoot) return;
+        vscode.postMessage({ type: "push", force: true, repositoryRoot: selectedRepositoryRoot });
+    }, [selectedRepositoryRoot]);
 
     const handleSync = useCallback(() => {
-        vscode.postMessage({ type: "sync" });
-    }, []);
+        if (!selectedRepositoryRoot) return;
+        vscode.postMessage({ type: "sync", repositoryRoot: selectedRepositoryRoot });
+    }, [selectedRepositoryRoot]);
 
     const handleOpenRepository = useCallback(() => {
         vscode.postMessage({ type: "openRepository" });
     }, []);
 
     const handleFetch = useCallback(() => {
-        vscode.postMessage({ type: "fetch" });
-    }, []);
+        if (!selectedRepositoryRoot) return;
+        vscode.postMessage({ type: "fetch", repositoryRoot: selectedRepositoryRoot });
+    }, [selectedRepositoryRoot]);
 
     const handlePull = useCallback(() => {
-        vscode.postMessage({ type: "pull" });
-    }, []);
+        if (!selectedRepositoryRoot) return;
+        vscode.postMessage({ type: "pull", repositoryRoot: selectedRepositoryRoot });
+    }, [selectedRepositoryRoot]);
 
     const handleDock = useCallback(() => {
         vscode.postMessage({ type: "dock" });

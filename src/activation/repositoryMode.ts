@@ -895,7 +895,7 @@ export async function activateRepositoryMode(
                         );
                     });
             }),
-            undocked.onWorktreeAction?.(({ action, path: worktreePath }) => {
+            undocked.onWorktreeAction?.(({ action, path: worktreePath, repositoryRoot }) => {
                 const worktree = undockedWorktrees.find(
                     (candidate) => candidate.path === worktreePath,
                 );
@@ -909,7 +909,10 @@ export async function activateRepositoryMode(
                     });
                     return;
                 }
-                void vscode.commands.executeCommand(`intelligit.worktree.${action}`, worktree);
+                void vscode.commands.executeCommand(`intelligit.worktree.${action}`, {
+                    ...worktree,
+                    repositoryRoot,
+                });
             }) ?? new vscode.Disposable(() => undefined),
             undocked.onDeleteBranches?.((branchSelection: BranchDeleteSelection) => {
                 const requestedNames = Array.from(
@@ -944,14 +947,15 @@ export async function activateRepositoryMode(
             undocked.onCommitAction(async ({ action, hash }) => {
                 const originProvider = undocked;
                 if (!originProvider) return;
+                const actionRoot = getUndockedSelectedRepositoryRoot();
                 try {
                     await handleCommitContextAction({
                         action,
                         hash,
-                        executor: undockedExecutor,
-                        gitOps: undockedGitOps,
+                        executor: undockedExecutor.deriveFor(actionRoot),
+                        gitOps: undockedGitOps.deriveFor(actionRoot),
                         mutationGate,
-                        repoRoot: getUndockedSelectedRepositoryRoot(),
+                        repoRoot: actionRoot,
                         currentBranches: undockedBranches,
                         refreshAll: async () => {
                             if (getUndockedSelectedRepositoryRoot() === repoRoot) {

@@ -34,6 +34,7 @@ interface CommitScopedSelection {
 }
 
 interface CommitInfoPaneProps {
+    repositoryRoot?: string;
     detail: CommitDetail | null;
     loading?: boolean;
     /**
@@ -110,6 +111,7 @@ function CommitRefRow({
  * expansion and selection scoped to the active commit hash.
  */
 export function CommitInfoPane({
+    repositoryRoot,
     detail,
     loading = false,
     hasSelection = false,
@@ -210,6 +212,7 @@ export function CommitInfoPane({
             bg={JETBRAINS_UI.color.panel}
         >
             <CommitChangedFilesPanel
+                repositoryRoot={repositoryRoot}
                 detail={detail}
                 tree={tree}
                 expandedDirs={expandedDirs}
@@ -341,6 +344,7 @@ const SKELETON_BAR_STYLE: React.CSSProperties = {
 };
 
 function CommitChangedFilesPanel({
+    repositoryRoot,
     detail,
     tree,
     expandedDirs,
@@ -354,6 +358,7 @@ function CommitChangedFilesPanel({
     onSelectFile,
     onOpenDiff,
 }: {
+    repositoryRoot?: string;
     detail: CommitDetail;
     tree: TreeEntry[];
     expandedDirs: Set<string>;
@@ -398,6 +403,7 @@ function CommitChangedFilesPanel({
                                 filePath: file.path,
                                 commitHash: detail.hash,
                                 commitShortHash: detail.shortHash,
+                                ...(repositoryRoot ? { repositoryRoot } : {}),
                                 preventDefaultContextMenuItems: true,
                             }),
                         })}

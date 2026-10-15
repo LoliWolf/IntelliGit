@@ -56,6 +56,7 @@ vi.mock("../../../src/diff/editableDiffOpener", () => ({
 }));
 
 import {
+    publishBranchFromPanel,
     selectStashFromPanel,
     showDiffFromPanel,
     showStashDiffFromPanel,
@@ -134,6 +135,25 @@ beforeEach(() => {
             fakeCancellationToken(),
         ),
     );
+});
+
+describe("publishBranchFromPanel", () => {
+    it("forwards the clicked repository instead of relying on the global active root", async () => {
+        vscodeMock.commands.executeCommand.mockClear();
+        const refreshData = vi.fn(async () => undefined);
+        const fireWorkingTreeChanged = vi.fn();
+        await publishBranchFromPanel({
+            gitOps: makeGitOps(),
+            getWorkspaceRoot: () => ({ fsPath: "/repo-b" }) as never,
+            refreshData,
+            fireWorkingTreeChanged,
+        });
+        expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+            "intelligit.publishBranch",
+            "/repo-b",
+        );
+        expect(refreshData).toHaveBeenCalledOnce();
+    });
 });
 
 describe("showStashDiffFromPanel", () => {

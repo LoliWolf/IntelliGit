@@ -63,8 +63,10 @@ export function createRemoteWorkspaceFixtureScript(parent = "/tmp"): string {
             configure(a);fs.writeFileSync(path.join(a,"base.txt"),"base\\n");git(a,["add","."]);git(a,["commit","-m","base"]);
             git(a,["clone","--no-hardlinks",a,b]);configure(b);
             git(b,["checkout","-b","incoming"]);fs.writeFileSync(path.join(b,"merge.txt"),"remote merge\\n");git(b,["add","."]);git(b,["commit","-m","selected incoming"]);const incoming=git(b,["rev-parse","HEAD"]);git(b,["checkout","main"]);
+            const linkedB=path.join(root,"linked-b");
+            git(b,["worktree","add","--detach",linkedB,"HEAD"]);
             fs.writeFileSync(path.join(a,"pull.txt"),"remote pull\\n");git(a,["add","."]);git(a,["commit","-m","remote advance"]);git(a,["branch","incoming"]);
-            console.log(JSON.stringify({root,workspace,a,b,aHead:git(a,["rev-parse","HEAD"]),incoming}));
+            console.log(JSON.stringify({root,workspace,a,b,linkedB,aHead:git(a,["rev-parse","HEAD"]),incoming}));
         } catch (error) {
             try { fs.rmSync(root,{recursive:true,force:true,maxRetries:3,retryDelay:100}); }
             catch (cleanupError) { throw new AggregateError([error,cleanupError],"Remote fixture initialization and cleanup failed"); }
