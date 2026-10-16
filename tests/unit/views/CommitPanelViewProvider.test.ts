@@ -33,6 +33,7 @@
  * discarding `postMessage`.
  */
 
+import { ChangelistStore } from "../../../src/changes/changelistStore";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1080,6 +1081,38 @@ describe("expanded-row refresh filter", () => {
 });
 
 describe("CommitPanelViewProvider native commit bridge wiring", () => {
+    it.each([null, { schemaVersion: 99, entries: [] }])(
+        "constructs and rehydrates with refused metadata (%j) without modifying storage",
+        async (metadata) => {
+            const root = "/refused-repo";
+            const initial = {
+                "intelligit.changelists.v1": metadata,
+                [`commitDraft:${root}`]: "recoverable draft",
+            };
+            const { bridge, provider, workspace } = createBridgeProvider(root, initial);
+            expect(bridge.options?.readDraft(root)).toBe("recoverable draft");
+            const view = createInspectableCommitPanelWebviewView();
+            provider.resolveWebviewView(view.webviewView, INERT_CONTEXT, INERT_TOKEN);
+            const privateProvider = provider as unknown as {
+                startupReadCompleted: boolean;
+                postWorkingTreeSnapshot: () => Promise<void>;
+                refreshAllRepositories: () => Promise<void>;
+                refreshGraphData: () => Promise<void>;
+            };
+            privateProvider.startupReadCompleted = true;
+            vi.spyOn(privateProvider, "postWorkingTreeSnapshot").mockResolvedValue(undefined);
+            vi.spyOn(privateProvider, "refreshAllRepositories").mockResolvedValue(undefined);
+            vi.spyOn(privateProvider, "refreshGraphData").mockResolvedValue(undefined);
+            await view.receiveMessage({ type: "ready", attempt: 2 });
+            expect(messagesOfType(view.posted, "restoreCommitDraft").at(-1)).toMatchObject({
+                repositoryRoot: root,
+                message: "recoverable draft",
+            });
+            expect(Object.fromEntries(workspace.values)).toEqual(initial);
+            expect(workspace.events).toEqual([]);
+        },
+    );
+
     it("saveCommitDraft calls setFromPanel for scoped root before persistence", async () => {
         const { bridge, provider, workspace, root } = createBridgeProvider();
         const view = createInspectableCommitPanelWebviewView();
@@ -1093,7 +1126,7 @@ describe("CommitPanelViewProvider native commit bridge wiring", () => {
 
         expect(bridge.setFromPanel).toEqual([{ root, message: "panel" }]);
         expect(bridge.order).toEqual(["bridge", "persist"]);
-        expect(workspace.values.get(`commitDraft:${root}`)).toBe("panel");
+        expect(ChangelistStore.forStorage(workspace.state).draft(root, "all")).toBe("panel");
     });
 
     it("saveCommitDraft still persists when the bridge throws", async () => {
@@ -1111,12 +1144,12 @@ describe("CommitPanelViewProvider native commit bridge wiring", () => {
             }),
         ).resolves.toBeUndefined();
 
-        expect(workspace.values.get(`commitDraft:${root}`)).toBe("safe");
+        expect(ChangelistStore.forStorage(workspace.state).draft(root, "all")).toBe("safe");
         expect(consoleError).toHaveBeenCalledTimes(1);
         consoleError.mockRestore();
     });
 
-    it("native change persists and posts restoreCommitDraft synchronously", () => {
+    it("native change posts its durable draft after serialized persistence", async () => {
         const { bridge, provider, workspace, root } = createBridgeProvider();
         const view = createInspectableCommitPanelWebviewView();
         provider.resolveWebviewView(view.webviewView, INERT_CONTEXT, INERT_TOKEN);
@@ -1126,8 +1159,8 @@ describe("CommitPanelViewProvider native commit bridge wiring", () => {
         callbacks.persistDraft(root, "native");
         callbacks.onNativeChange(root, "native");
 
-        expect(bridge.order).toEqual(["persist"]);
-        expect(workspace.values.get(`commitDraft:${root}`)).toBe("native");
+        await vi.waitFor(() => expect(bridge.order).toEqual(["persist"]));
+        expect(ChangelistStore.forStorage(workspace.state).draft(root, "all")).toBe("native");
         expect(messagesOfType(view.posted, "restoreCommitDraft").at(-1)).toEqual({
             type: "restoreCommitDraft",
             repositoryRoot: root,
@@ -1158,10 +1191,12 @@ describe("CommitPanelViewProvider native commit bridge wiring", () => {
 
         await view.receiveMessage({ type: "ready", attempt: 2 });
 
-        expect(messagesOfType(view.posted, "restoreCommitDraft").at(-1)).toMatchObject({
-            repositoryRoot: root,
-            message: "adopted",
-        });
+        await vi.waitFor(() =>
+            expect(messagesOfType(view.posted, "restoreCommitDraft").at(-1)).toMatchObject({
+                repositoryRoot: root,
+                message: "adopted",
+            }),
+        );
     });
 
     it("successful clear-on-commit clears native input while view is hidden", async () => {
@@ -1199,7 +1234,7 @@ describe("CommitPanelViewProvider native commit bridge wiring", () => {
         await view.receiveMessage({ type: "getLastCommitMessage", repositoryRoot: root });
 
         expect(bridge.setFromPanel).toContainEqual({ root, message: "last message" });
-        expect(workspace.values.get(`commitDraft:${root}`)).toBe("last message");
+        expect(ChangelistStore.forStorage(workspace.state).draft(root, "all")).toBe("last message");
         expect(messagesOfType(view.posted, "lastCommitMessage").at(-1)).toMatchObject({
             repositoryRoot: root,
             message: "last message",
