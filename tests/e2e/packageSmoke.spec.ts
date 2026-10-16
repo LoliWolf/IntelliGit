@@ -21,6 +21,7 @@ import {
 } from "./hostFixtures/resolveVSCodeExecutable";
 import {
     assertExactInstalledExtensionVersion,
+    assertPinnedVSCodeRuntimeVersion,
     buildInstalledExtensionLaunchArgs,
     buildPackageCliInvocation,
 } from "./hostFixtures/packageSmokeHelpers";
@@ -183,6 +184,59 @@ test.describe("installed VSIX package smoke", () => {
             });
             await window.waitForLoadState("domcontentloaded");
             await dismissFirstRunDialogs(window);
+
+            const runtime = await electronApp.evaluate(({ app }) => ({
+                applicationVersion: app.getVersion(),
+                appPath: app.getAppPath(),
+                executable: app.getPath("exe"),
+                userData: app.getPath("userData"),
+                node: process.versions.node,
+                electron: process.versions.electron,
+                chrome: process.versions.chrome,
+                portableMode: Boolean(process.env.VSCODE_PORTABLE),
+                profileArgs: process.argv.filter((argument) =>
+                    [
+                        "--user-data-dir=",
+                        "--extensions-dir=",
+                        "--profile=",
+                        "--disable-extensions",
+                    ].some((prefix) => argument.startsWith(prefix)),
+                ),
+                developmentExtension: process.argv.some((argument) =>
+                    argument.startsWith("--extensionDevelopmentPath"),
+                ),
+            }));
+            console.log(`[package smoke] process runtime: ${JSON.stringify(runtime)}`);
+            const appPackage = JSON.parse(
+                await readFile(path.join(runtime.appPath, "package.json"), "utf8"),
+            ) as { version?: unknown };
+            const appProduct = JSON.parse(
+                await readFile(path.join(runtime.appPath, "product.json"), "utf8"),
+            ) as { commit?: unknown };
+            const runtimeInfo = {
+                ...runtime,
+                packageVersion:
+                    typeof appPackage.version === "string" ? appPackage.version : "<invalid>",
+                commit:
+                    typeof appProduct.commit === "string"
+                        ? appProduct.commit.slice(0, 80)
+                        : "<unknown>",
+                requestedVersion: requestedVSCodeVersion,
+                expectedExecutable: executablePath,
+                expectedUserData: userDataDir,
+                expectedExtensions: extensionsDir,
+            };
+            console.log(`[package smoke] actual runtime: ${JSON.stringify(runtimeInfo)}`);
+            await testInfo.attach("installed-runtime.json", {
+                body: JSON.stringify(runtimeInfo, null, 2),
+                contentType: "application/json",
+            });
+            expect(runtime.developmentExtension).toBe(false);
+            assertPinnedVSCodeRuntimeVersion(
+                appPackage.version,
+                requestedVSCodeVersion,
+                Boolean(process.env.INTELLIGIT_VSCODE_EXECUTABLE?.trim()),
+            );
 
             const intelliGitView = new IntelliGitView(window);
             const frame = await intelliGitView.reveal();
