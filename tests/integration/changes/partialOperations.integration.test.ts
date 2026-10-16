@@ -53,6 +53,20 @@ describe("selected operations on real Git", () => {
         expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
     });
 
+    it.each(["color.ui", "color.diff"])(
+        "exports an applicable uncolored selection when %s is always",
+        async (setting) => {
+            git(["config", setting, "always"]);
+            const patch = await partial.exportPatch(await selection(), () => undefined);
+            expect(patch.includes(0x1b)).toBe(false);
+            execFileSync("git", ["apply", "--reverse", "--check", "-"], {
+                cwd: root,
+                input: patch,
+            });
+            expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
+        },
+    );
+
     it.each(["unstaged", "fully staged", "split staging"] as const)(
         "rolls back one block with %s while preserving the other block and unrelated staging",
         async (mode) => {
@@ -97,6 +111,61 @@ describe("selected operations on real Git", () => {
         await expect(partial.rollback(chosen, () => undefined)).rejects.toThrow();
         expect(await readFile(path.join(root, ".git/index.lock"), "utf8")).toBe("foreign");
         expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
+    });
+
+    it("releases only its owned lock when a buffer becomes dirty before the file replacement", async () => {
+        const chosen = await selection();
+        const snapshot = partial.snapshot(chosen.snapshotId);
+        const index = await readFile(path.join(root, ".git/index"));
+        const failure = new Error("native buffer became dirty before replacement");
+        let afterLock = false;
+        let guarded = 0;
+        await expect(
+            partial.rollback(
+                chosen,
+                () => {
+                    if (afterLock && ++guarded === 3) throw failure;
+                },
+                {
+                    afterLock: async () => {
+                        afterLock = true;
+                    },
+                },
+            ),
+        ).rejects.toBe(failure);
+        expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        await expect(readFile(path.join(root, ".git/index.lock"))).rejects.toMatchObject({
+            code: "ENOENT",
+        });
+        expect(await readdir(path.join(root, ".git/intelligit/partial-index"))).toEqual([]);
+        expect(await partial.canRestoreInclusion(snapshot)).toBe(true);
+    });
+
+    it("retains a modified lock refused at the final pre-replacement check", async () => {
+        const chosen = await selection();
+        const index = await readFile(path.join(root, ".git/index"));
+        const lock = path.join(root, ".git/index.lock");
+        let afterLock = false;
+        let guarded = 0;
+        await expect(
+            partial.rollback(
+                chosen,
+                async () => {
+                    if (afterLock && ++guarded === 3)
+                        await writeFile(lock, "externally modified lock");
+                },
+                {
+                    afterLock: async () => {
+                        afterLock = true;
+                    },
+                },
+            ),
+        ).rejects.toThrow();
+        expect(await readFile(lock, "utf8")).toBe("externally modified lock");
+        expect(await readFile(path.join(root, "text.txt"), "utf8")).toBe(working);
+        expect(await readFile(path.join(root, ".git/index"))).toEqual(index);
+        expect(await readdir(path.join(root, ".git/intelligit/partial-index"))).toHaveLength(1);
     });
 
     it("recovers index reconciliation after the worktree transition without repeating the rollback", async () => {

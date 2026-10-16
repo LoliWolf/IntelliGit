@@ -151,7 +151,6 @@ export async function publishPartialIndex(
             }
         }
         if (worktree) {
-            worktreeWriteStarted = true;
             await replaceMergeWorktreeFile(
                 snapshot.root,
                 worktree.path,
@@ -159,6 +158,7 @@ export async function publishPartialIndex(
                 async () => {
                     await recheck();
                     await assertPreparedLock(lockPath, journal);
+                    worktreeWriteStarted = true;
                 },
             );
             await syncDirectory(path.dirname(path.join(snapshot.root, worktree.path)));

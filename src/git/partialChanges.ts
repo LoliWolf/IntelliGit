@@ -114,6 +114,7 @@ export class PartialChanges {
                         "--full-index",
                         "--no-ext-diff",
                         "--no-textconv",
+                        "--no-color",
                         "--src-prefix=a/",
                         "--dst-prefix=b/",
                         snapshot.head,

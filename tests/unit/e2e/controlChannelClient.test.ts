@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { E2eRequest, E2eResponse } from "../../../src/e2e/protocol";
@@ -20,6 +21,7 @@ const REQUEST_PAYLOAD: E2eRequestInput = {
 };
 
 let channelDir: string;
+const REQUEST_APPEARANCE_TIMEOUT_MS = 10_000;
 
 beforeEach(async () => {
     channelDir = await mkdtemp(join(tmpdir(), "intelligit-e2e-client-test-"));
@@ -32,15 +34,15 @@ afterEach(async () => {
 /**
  * Waits for the client to publish one complete request file and returns its parsed envelope.
  *
- * The budget guards a hang, not a deadline any assertion here is about: the publish always
- * happens, and on a shared Windows runner it has outlasted the 500ms this used to allow. The first
+ * The budget guards a hang in the normal publish flow, not filesystem latency: on a shared
+ * Windows runner publication has outlasted the 500ms this used to allow. The first
  * attempt of run 34700493095 failed three cases at the old budget with `test request did not
  * appear within the timeout` while the client was still inside its temp-file-plus-rename publish;
  * the re-run of the same commit passed them.
  */
-async function waitForRequest(timeoutMs = 10_000): Promise<E2eRequest> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
+async function waitForRequest(timeoutMs = REQUEST_APPEARANCE_TIMEOUT_MS): Promise<E2eRequest> {
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
         const requestFilename = (await readdir(channelDir)).find((filename) =>
             filename.endsWith(".request.json"),
         );
@@ -72,6 +74,26 @@ async function writeResponse(response: E2eResponse): Promise<void> {
 function handled<T>(promise: Promise<T>): Promise<T> {
     void promise.catch(() => undefined);
     return promise;
+}
+
+/** A real watchdog restores Date even if a state-check await never reaches its finally. */
+function pauseResponseStateClock(maxPauseMs = REQUEST_APPEARANCE_TIMEOUT_MS): {
+    expired(): boolean;
+    restore(): void;
+} {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let expired = false;
+    const watchdog = setTimeout(() => {
+        expired = true;
+        vi.useRealTimers();
+    }, maxPauseMs);
+    return {
+        expired: () => expired,
+        restore: () => {
+            clearTimeout(watchdog);
+            vi.useRealTimers();
+        },
+    };
 }
 
 describe("writeE2eRequestAtomic", () => {
@@ -145,8 +167,8 @@ describe("E2eControlChannelClient response polling", () => {
     it("keeps polling through a missing and invalid response until a valid response appears", async () => {
         await writeFile(join(channelDir, E2E_CHANNEL_READY_MARKER), "ready\n", "utf8");
         // This case tests response states, not disk latency. Real timers and I/O still poll;
-        // the separate deadline case below verifies expiry against the actual clock.
-        vi.useFakeTimers({ toFake: ["Date"] });
+        // the watchdog bounds the pause, and separate cases verify real-clock expiry.
+        const clock = pauseResponseStateClock();
         try {
             const client = new E2eControlChannelClient(channelDir, {
                 readinessTimeoutMs: 100,
@@ -165,7 +187,37 @@ describe("E2eControlChannelClient response polling", () => {
 
             await expect(responsePromise).resolves.toEqual(response);
         } finally {
-            vi.useRealTimers();
+            clock.restore();
+        }
+    });
+
+    it("bounds a missing request while the response-state Date clock stays paused", async () => {
+        const clock = pauseResponseStateClock();
+        const frozen = Date.now();
+        try {
+            await expect(waitForRequest(1)).rejects.toThrow("request did not appear");
+            expect(Date.now()).toBe(frozen);
+            expect(clock.expired()).toBe(false);
+        } finally {
+            clock.restore();
+        }
+    });
+
+    it("restores real time without awaiting a missing response first", async () => {
+        await writeFile(join(channelDir, E2E_CHANNEL_READY_MARKER), "ready\n", "utf8");
+        const clock = pauseResponseStateClock(25);
+        try {
+            const client = new E2eControlChannelClient(channelDir, {
+                readinessTimeoutMs: 100,
+                responseTimeoutMs: 10,
+                pollIntervalMs: 1,
+            });
+            await expect(client.request(REQUEST_PAYLOAD)).rejects.toThrow(
+                "did not arrive within 10ms",
+            );
+            expect(clock.expired()).toBe(true);
+        } finally {
+            clock.restore();
         }
     });
 
@@ -178,7 +230,7 @@ describe("E2eControlChannelClient response polling", () => {
         });
 
         // The handler is attached where the promise is created, not at the assertion. This is the
-        // one case in the file whose promise is expected to REJECT, and `responseTimeoutMs` is 25ms
+        // promise in this case is expected to REJECT, and `responseTimeoutMs` is 25ms
         // -- less than the `waitForRequest` directory poll below costs on a slow filesystem. So the
         // rejection lands while nothing is watching it, Node reports an unhandled rejection, and
         // that fails the RUN while this test still passes: `.rejects` is satisfied by a promise

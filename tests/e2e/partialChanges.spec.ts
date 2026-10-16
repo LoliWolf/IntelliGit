@@ -76,6 +76,7 @@ test.describe("Selected changes and changelists", () => {
             workspace.env,
         );
         await createFiles(workspace.root, workspace.env);
+        await runGit(workspace.root, ["config", "color.ui", "always"], workspace.env);
         const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
         const index = await runGit(workspace.root, ["write-tree"], workspace.env);
         const output = path.join(workspace.root, "selected-proof.patch");
@@ -111,7 +112,9 @@ test.describe("Selected changes and changelists", () => {
                 .poll(() => readFile(output, "utf8").catch(() => ""))
                 .toContain("+export const first = 3;");
             await expect(editor.getByRole("status")).toContainText("Selected patch exported");
-            expect(await readFile(output, "utf8")).not.toContain("+export const second = 4;");
+            const patch = await readFile(output, "utf8");
+            expect(patch).not.toContain("+export const second = 4;");
+            expect(patch).not.toContain("\u001b");
             await runGit(workspace.root, ["apply", "--reverse", "--check", output], workspace.env);
             expect(await readFile(path.join(workspace.root, FILE), "utf8")).toBe(working);
             expect(await runGit(workspace.root, ["write-tree"], workspace.env)).toBe(index);
@@ -127,6 +130,7 @@ test.describe("Selected changes and changelists", () => {
     }, testInfo) => {
         const { workspace } = fixtureWorkspace;
         await createFiles(workspace.root, workspace.env);
+        await runGit(workspace.root, ["config", "color.diff", "always"], workspace.env);
         const head = await runGit(workspace.root, ["rev-parse", "HEAD"], workspace.env);
         const app = await launchFixtureWorkspace({
             executablePath: await resolveVSCodeExecutable(REPO_ROOT),
