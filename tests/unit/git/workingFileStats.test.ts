@@ -106,4 +106,30 @@ describe("viewport working-file statistics", () => {
         expect(await git.getWorkingFileStats([file("a")], [])).toEqual([]);
         expect(run).not.toHaveBeenCalled();
     });
+
+    it("waits for both reads before releasing a failed batch", async () => {
+        let release!: () => void;
+        const companion = new Promise<string>((resolve) => {
+            release = () => resolve("");
+        });
+        const run = vi.fn(async (args: string[]) => {
+            if (args.includes("--cached")) return companion;
+            throw new Error("worktree read failed");
+        });
+        let rejected: unknown;
+        const result = new GitOps(binaryExecutor(run))
+            .getWorkingFileStats([file("a")], ["a"])
+            .catch((error: unknown) => {
+                rejected = error;
+            });
+        try {
+            await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(rejected).toBeUndefined();
+        } finally {
+            release();
+            await result;
+        }
+        expect(rejected).toEqual(new Error("worktree read failed"));
+    });
 });

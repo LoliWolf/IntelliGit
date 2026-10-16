@@ -365,7 +365,9 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const sidebar = await new IntelliGitView(page).reveal();
             const graph = page.getByRole("button", { name: "Graph Section", exact: true });
-            if ((await graph.getAttribute("aria-expanded")) === "true") await graph.click();
+            if ((await graph.getAttribute("aria-expanded")) === "true")
+                await graph.getByRole("heading", { name: "Graph", exact: true }).click();
+            await expect(graph).toHaveAttribute("aria-expanded", "false");
             const tree = sidebar.getByTestId("virtual-commit-tree");
             await expect(tree).toBeVisible();
             expect(await tree.locator("[data-virtual-row-index]").count()).toBeLessThan(100);

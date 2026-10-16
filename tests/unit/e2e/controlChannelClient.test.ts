@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { E2eRequest, E2eResponse } from "../../../src/e2e/protocol";
 import { E2E_CHANNEL_READY_MARKER } from "../../../src/e2e/transportFs";
@@ -144,23 +144,29 @@ describe("E2eControlChannelClient response polling", () => {
 
     it("keeps polling through a missing and invalid response until a valid response appears", async () => {
         await writeFile(join(channelDir, E2E_CHANNEL_READY_MARKER), "ready\n", "utf8");
-        const client = new E2eControlChannelClient(channelDir, {
-            readinessTimeoutMs: 100,
-            responseTimeoutMs: 500,
-            pollIntervalMs: 5,
-        });
+        // This case tests response states, not disk latency. Real timers and I/O still poll;
+        // the separate deadline case below verifies expiry against the actual clock.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+            const client = new E2eControlChannelClient(channelDir, {
+                readinessTimeoutMs: 100,
+                responseTimeoutMs: 500,
+                pollIntervalMs: 5,
+            });
+            const responsePromise = handled(client.request(REQUEST_PAYLOAD));
+            const request = await waitForRequest();
+            const responsePath = join(channelDir, `${request.nonce}.response.json`);
 
-        const responsePromise = handled(client.request(REQUEST_PAYLOAD));
-        const request = await waitForRequest();
-        const responsePath = join(channelDir, `${request.nonce}.response.json`);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            await writeFile(responsePath, '{"nonce":', "utf8");
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            const response: E2eResponse = { nonce: request.nonce, ok: false, error: "rejected" };
+            await writeResponse(response);
 
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        await writeFile(responsePath, '{"nonce":', "utf8");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        const response: E2eResponse = { nonce: request.nonce, ok: false, error: "rejected" };
-        await writeResponse(response);
-
-        await expect(responsePromise).resolves.toEqual(response);
+            await expect(responsePromise).resolves.toEqual(response);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("bounds polling when the response remains missing", async () => {

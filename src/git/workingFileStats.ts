@@ -31,7 +31,7 @@ export async function readWorkingFileStats(
     if ([...literals].reduce((sum, file) => sum + Buffer.byteLength(file) + 1, 0) > 64 * 1024)
         throw new Error("Working-file statistics exceed the path byte budget.");
     const deadline = AbortSignal.timeout(10_000);
-    const results = await Promise.all(
+    const settled = await Promise.allSettled(
         [false, true].map(async (staged) => {
             const result = await executor.runBinary(
                 [
@@ -55,6 +55,10 @@ export async function readWorkingFileStats(
             return { staged, values: parseNulNumstat(result.stdout.toString("utf8")) };
         }),
     );
+    const results = settled.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+    });
     return selected.map((file) => {
         const counts = results
             .find((result) => result.staged === file.staged)
