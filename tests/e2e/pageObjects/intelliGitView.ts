@@ -93,7 +93,9 @@ export class IntelliGitView {
     public async reveal(timeoutMs = DEFAULT_REVEAL_TIMEOUT_MS): Promise<FrameLocator> {
         // Focus is idempotent and targets Commit even when the container's Show action is gated.
         // Activity-bar toggles can close a view restored between an expanded-state read and click.
-        await new Workbench(this.page).runCommand("IntelliGit: Focus on Commit View");
+        await new Workbench(this.page).runCommand("IntelliGit: Focus on Commit View", {
+            reopenVisiblePalette: true,
+        });
         return this.frameOwning(SIDEBAR_MARKER, timeoutMs);
     }
 

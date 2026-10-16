@@ -39,8 +39,13 @@ export class Workbench {
      *
      * Re-sending the chord is safe: it runs "Show All Commands", which re-opens an open palette
      * rather than toggling it shut, and `fill` replaces whatever a previous attempt typed.
+     * Idempotent view reads can additionally dismiss a visible picker before retrying, rebuilding
+     * a command list captured before extension registration. Other command callers keep the default.
      */
-    public async runCommand(label: string): Promise<void> {
+    public async runCommand(
+        label: string,
+        options: { reopenVisiblePalette?: boolean } = {},
+    ): Promise<void> {
         const modifier = process.platform === "darwin" ? "Meta" : "Control";
         // VS Code 1.96 exposes a combobox named "input"; newer versions use a textbox.
         const commandInput = this.page.getByPlaceholder("Type the name of a command to run.", {
@@ -58,6 +63,11 @@ export class Workbench {
                 // Rethrow the last attempt's own error: whichever step it came from, it names the
                 // locator or the palette contents, which a hand-written message would throw away.
                 if (attempt === PALETTE_ATTEMPTS) throw error;
+                // Only idempotent view reads opt in: a cold palette can predate extension commands.
+                if (options.reopenVisiblePalette && (await commandInput.isVisible())) {
+                    await this.page.keyboard.press("Escape");
+                    await commandInput.waitFor({ state: "hidden", timeout: PALETTE_TIMEOUT_MS });
+                }
             }
         }
     }
