@@ -178,6 +178,7 @@ test.describe("Selected changes and changelists", () => {
             await expect
                 .poll(() => readFile(path.join(workspace.root, FILE), "utf8"))
                 .toBe(base.replace("second = 2", "second = 4"));
+            await expect(editor.getByRole("status")).toContainText("Selected changes shelved");
             expect(await runGit(workspace.root, ["show", `:${FILE}`], workspace.env)).toBe(base);
             expect(await runGit(workspace.root, ["show", `:${OTHER}`], workspace.env)).toBe(
                 "user staged\n",
@@ -239,6 +240,7 @@ test.describe("Selected changes and changelists", () => {
             await expect
                 .poll(() => readFile(path.join(workspace.root, FILE), "utf8"))
                 .toBe(remaining);
+            await expect(editor.getByRole("status")).toContainText("Selected changes rolled back");
             expect(await runGit(workspace.root, ["show", `:${FILE}`], workspace.env)).toBe(
                 remaining,
             );
@@ -309,6 +311,7 @@ test.describe("Selected changes and changelists", () => {
             await expect
                 .poll(() => runGit(workspace.root, ["log", "-1", "--format=%s"], workspace.env))
                 .toBe("Native selected amend\n");
+            await expect(editor.getByRole("status")).toContainText("Committed");
             expect(
                 await runGit(workspace.root, ["show", "-s", "--format=%P", "HEAD"], workspace.env),
             ).toBe(parents);
