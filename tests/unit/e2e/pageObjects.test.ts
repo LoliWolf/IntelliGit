@@ -419,7 +419,7 @@ describe("IntelliGitView", () => {
         };
     }
 
-    /** A workbench holding the given webviews, with the Show command as the native UI boundary. */
+    /** A workbench holding the given webviews, with the view command as the native UI boundary. */
     function workbenchPage(webviews: readonly { outer: unknown }[]): {
         page: Page;
         show: ReturnType<typeof vi.spyOn<Workbench, "runCommand">>;
@@ -455,7 +455,21 @@ describe("IntelliGitView", () => {
         return { page, show, emitConsole };
     }
 
-    it("waits for Show IntelliGit to finish before finding the sidebar", async () => {
+    it("opens the Commit view when the container Show command is unavailable", async () => {
+        const sidebar = webview([SIDEBAR_MARKER]);
+        const webviews: { outer: unknown }[] = [];
+        const { page, show } = workbenchPage(webviews);
+        show.mockImplementation(async (label) => {
+            if (label !== "IntelliGit: Focus on Commit View")
+                throw new Error("The container Show command is unavailable.");
+            webviews.push(sidebar);
+        });
+
+        await expect(new IntelliGitView(page).reveal()).resolves.toBe(sidebar.inner);
+        expect(show).toHaveBeenCalledExactlyOnceWith("IntelliGit: Focus on Commit View");
+    });
+
+    it("waits for Commit focus to finish before finding the sidebar", async () => {
         const sidebar = webview([SIDEBAR_MARKER]);
         const webviews: { outer: unknown }[] = [];
         const { page, show } = workbenchPage(webviews);
@@ -466,10 +480,10 @@ describe("IntelliGitView", () => {
 
         await expect(new IntelliGitView(page).reveal()).resolves.toBe(sidebar.inner);
 
-        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
+        expect(show).toHaveBeenCalledExactlyOnceWith("IntelliGit: Focus on Commit View");
     });
 
-    it("uses the idempotent Show command again when the sidebar is already open", async () => {
+    it("uses the idempotent focus command again when the sidebar is already open", async () => {
         const sidebar = webview([SIDEBAR_MARKER]);
         const { page, show } = workbenchPage([sidebar]);
         const view = new IntelliGitView(page);
@@ -477,15 +491,18 @@ describe("IntelliGitView", () => {
         await expect(view.reveal()).resolves.toBe(sidebar.inner);
         await expect(view.reveal()).resolves.toBe(sidebar.inner);
 
-        expect(show.mock.calls).toEqual([["View: Show IntelliGit"], ["View: Show IntelliGit"]]);
+        expect(show.mock.calls).toEqual([
+            ["IntelliGit: Focus on Commit View"],
+            ["IntelliGit: Focus on Commit View"],
+        ]);
     });
 
-    it("reports a sidebar that still has no attached webview after the Show command", async () => {
+    it("reports a sidebar that still has no attached webview after the focus command", async () => {
         const { page, show } = workbenchPage([]);
 
         await expect(new IntelliGitView(page).reveal(50)).rejects.toThrow("(none attached)");
 
-        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
+        expect(show).toHaveBeenCalledExactlyOnceWith("IntelliGit: Focus on Commit View");
     });
 
     // The regression this exists for: `iframe.webview` elements are ordered by creation, so the
@@ -499,7 +516,7 @@ describe("IntelliGitView", () => {
 
         await expect(view.reveal()).resolves.toBe(sidebar.inner);
         await expect(view.revealPanel()).resolves.toBe(graphPanel.inner);
-        expect(show).toHaveBeenCalledExactlyOnceWith("View: Show IntelliGit");
+        expect(show).toHaveBeenCalledExactlyOnceWith("IntelliGit: Focus on Commit View");
     });
 
     it("skips a webview whose document is unreachable instead of failing on it", async () => {
