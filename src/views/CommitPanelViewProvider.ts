@@ -31,6 +31,7 @@ import type {
 import type { ShelfService } from "../services/shelfService";
 import type { DiscoveredRepository } from "../services/repositoryDiscovery";
 import { CommitPanelRepositoryRuntime } from "./commitPanelRepositoryRuntime";
+import { mergeWorkingFileStats } from "../webviews/protocol/workingFileStats";
 import { operationSnapshotForRepository } from "./commitPanelOperationSnapshot";
 import { ShelfConflictEditorPanel } from "./ShelfConflictEditorPanel";
 import { runPublishBranchFlow } from "../services/publishService";
@@ -561,6 +562,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     private invalidateRuntime(runtime: CommitPanelRepositoryRuntime): void {
+        runtime.fileStats.dispose();
         runtime.requestSeq += 1;
         runtime.dataRefreshSeq += 1;
         runtime.countRefreshSeq += 1;
@@ -1015,6 +1017,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     .getConfiguration("intelligit")
                     .get<boolean>("clearLastCommit", true),
             gitOps: runtime.gitOps,
+            shelfService: runtime.shelfService,
             files: () => runtime.files,
             post: (message) => this.postToWebview(message),
             actions: this.actionDepsForRuntime(runtime),
@@ -1428,6 +1431,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         try {
             const status = await runtime.gitOps.getStatus({
                 includeIgnored: runtime.showIgnoredFiles,
+                withStats: "lazy",
             });
             await this.iconTheme.initIconThemeData().catch(() => {});
             const [stashes, currentBranchStatus, shelfState] = await Promise.all([
@@ -1473,7 +1477,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 .catch(() => runtime.folderIconsByName);
             if (refreshRequestId === runtime.dataRefreshSeq) {
                 runtime.folderIconsByName = folderIconsByName;
-                runtime.files = files;
+                runtime.files = runtime.fileStats.reset(files);
                 void this.changeWorkflows
                     .get(runtime.repository.root)
                     ?.reconcile(files)
@@ -1851,6 +1855,21 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             return;
         }
         switch (msg.type) {
+            case "requestWorkingFileStats": {
+                const runtime = scopedRuntime();
+                if (!runtime || msg.repositoryRoot !== runtime.repository.root) return;
+                await runtime.fileStats.request(
+                    msg.revision,
+                    msg.paths,
+                    runtime.repository.root,
+                    runtime.gitOps,
+                    (reply) => {
+                        runtime.files = mergeWorkingFileStats(runtime.files, reply);
+                        this.postToWebview(reply);
+                    },
+                );
+                break;
+            }
             case "ready":
                 await this.handleReadyMessage(msg.attempt);
                 break;
@@ -2484,6 +2503,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
      * Releases theme listeners, icon resources, and event emitters owned by the Changes provider.
      */
     dispose(): void {
+        for (const runtime of this.runtimes.values()) this.invalidateRuntime(runtime);
         for (const workflow of this.changeWorkflows.values()) workflow.dispose();
         this.changeWorkflows.clear();
         this.commitMessageGenerationCoordinator?.dropHost(this.commitMessageGenerationHost);
