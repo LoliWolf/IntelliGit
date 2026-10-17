@@ -1,5 +1,6 @@
 import { ChangelistStore } from "../changes/changelistStore";
 import {
+    attachAfterChangelistLoad,
     changelistDraftBridge,
     saveAggregateDraft,
     readAggregateDraft,
@@ -9,6 +10,7 @@ import {
 // commit/push buttons, amend toggle, and stash management.
 // Frontend is a React + Chakra UI app loaded from dist/webview-commitpanel.js.
 import * as vscode from "vscode";
+import * as path from "node:path";
 import { GitOps } from "../git/operations";
 import {
     CommitMessageGenerationCoordinator,
@@ -456,7 +458,15 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             );
             runtime.lastKnownChangedFileCount = this.getStoredChangedFileCount(runtime);
             this.runtimes.set(repository.root, runtime);
-            this.nativeCommitInputBridge.attach(repository.root);
+            attachAfterChangelistLoad(
+                this.workspaceState,
+                repository.root,
+                () => gitOps.getGitDirectories(),
+                () => {
+                    if (this.runtimes.get(repository.root) === runtime)
+                        this.nativeCommitInputBridge.attach(repository.root);
+                },
+            );
         }
 
         this.repositories = repositories;
@@ -525,6 +535,20 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             })),
             activeRepositoryRoot: this.activeRepositoryRoot,
         });
+    }
+
+    /**
+     * Normalizes Git root spelling before opening its registered aggregate partial editor.
+     * Unknown roots and workflow failures reject without changing the selected repository.
+     */
+    async openPartialChanges(repositoryRoot: string, filePath: string): Promise<void> {
+        const runtime = this.runtimes.get(path.normalize(repositoryRoot));
+        if (!runtime) {
+            throw new Error(
+                vscode.l10n.t("Selected file is not in a known IntelliGit repository."),
+            );
+        }
+        await this.changeWorkflow(runtime).openFromEditor(filePath);
     }
 
     private getActiveRuntime(): CommitPanelRepositoryRuntime | undefined {
@@ -957,8 +981,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             : undefined;
     }
 
-    /** Captures repository-specific commit callbacks; All draft clearing is mirrored only after persistence succeeds. */
+    /** Captures root and draft before asynchronous actions; newer drafts never receive the clear signal. */
     private actionDepsForRuntime(runtime?: CommitPanelRepositoryRuntime) {
+        const expectedDraft = this.getStoredCommitDraft(runtime);
         return {
             gitOps: runtime?.gitOps ?? this.gitOps,
             refreshData: () => (runtime ? this.refreshData(false, runtime) : Promise.resolve()),
@@ -967,6 +992,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     ? this.refreshGraphData(runtime)
                     : Promise.resolve(),
             fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
+            /** Clears mirrored input only after unchanged captured text is durably cleared; newer drafts survive completion. */
             postCommitted: async () => {
                 let clearCommitMessage =
                     vscode.workspace
@@ -978,6 +1004,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                             this.workspaceState,
                             this.getCommitDraftStorageKey(runtime),
                             "",
+                            expectedDraft,
                         );
                     } catch {
                         clearCommitMessage = false;

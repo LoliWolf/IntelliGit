@@ -905,5 +905,11 @@
     "Selected changes were removed, but their list metadata needs review. Do not repeat the rollback.": "所選變更已移除，但清單中繼資料需要檢查。請勿重複回復。",
     "The selection is saved in shelf {name}, but its removal did not finish. Review the file and recovery before retrying.": "所選內容已儲存至 Shelf {name}，但移除操作尚未完成。重試前請檢查檔案與復原狀態。",
     "Selected changes saved in shelf {name}.": "所選變更已儲存至 Shelf {name}。",
-    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "所選操作已完成，但檢視重新整理失敗。請重新開啟編輯器後再進行其他操作。"
+    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "所選操作已完成，但檢視重新整理失敗。請重新開啟編輯器後再進行其他操作。",
+    "Commit partial text and structural changes separately.": "請分別提交部分文字變更和結構性變更。",
+    "Commit Whole Files": "提交整個檔案",
+    "These deleted or renamed files have stale change assignments. Commit their complete changes?": "這些已刪除或重新命名檔案的變更歸組已過時。要提交它們的全部變更嗎？",
+    "Open Partial Changes is only available for local files.": "僅能為本機檔案開啟部分變更。",
+    "Open Partial Changes failed: {message}": "無法開啟部分變更：{message}",
+    "Selected file is not in a known IntelliGit repository.": "所選檔案不在 IntelliGit 已知的儲存庫中。"
 }

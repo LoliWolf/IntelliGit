@@ -37,10 +37,9 @@ export class Workbench {
      *   one in the selecting click -- so recovering from a closed palette cannot be attached to
      *   whichever step happened to notice it.
      *
-     * Re-sending the chord is safe: it runs "Show All Commands", which re-opens an open palette
-     * rather than toggling it shut, and `fill` replaces whatever a previous attempt typed.
-     * Idempotent view reads can additionally dismiss a visible picker before retrying, rebuilding
-     * a command list captured before extension registration. Other command callers keep the default.
+     * Dismiss a failed picker before reopening so commands registered after its first snapshot
+     * are enumerated again; repeating the same query in a visible picker keeps stale results.
+     * Idempotent view reads additionally wait for a visible picker to close before retrying.
      */
     public async runCommand(
         label: string,
@@ -67,6 +66,8 @@ export class Workbench {
                 if (options.reopenVisiblePalette && (await commandInput.isVisible())) {
                     await this.page.keyboard.press("Escape");
                     await commandInput.waitFor({ state: "hidden", timeout: PALETTE_TIMEOUT_MS });
+                } else {
+                    await this.page.keyboard.press("Escape");
                 }
             }
         }

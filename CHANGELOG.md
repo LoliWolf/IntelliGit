@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Large Changes views load the status list without full line-count scans and request bounded statistics batches for visible rows. Retired replies cannot update a newer refresh or another repository.
 
+## [0.38.3] - 2026-10-16
+
+### Added
+
+- Open aggregate partial changes from local editor and native working-diff context menus, the editor-title context menu, or the command palette. The selected file's repository is used without changing the active changelist, commit scope, or drafts; existing selected-line assignment and partial workflows remain available.
+- This first Phase 3 slice adds native entry points. Scoped chunk moves, drag/drop, ownership decoration, inclusion polish, and empty-list cleanup remain later Phase 3 work.
+
+### Fixed
+
+- Keep changelist drafts and assignments writable when aggregate range evidence exceeds the old metadata budget. Immutable per-file evidence preserves complete ownership mapping and recent undo/redo while keeping revision polling and metadata edits independent of unrelated line arrays.
+- Upgrade existing worktree metadata losslessly with retained recovery backups; reject missing, corrupt or cross-worktree evidence without overwriting it.
+
+## [0.38.2] - 2026-10-15
+
+This release delivers the stable-ownership and persistence phase of changelists. Direct editor interactions and operation adapters remain separate follow-ups.
+
+### Added
+
+- Keep changelist ownership through unambiguous line shifts and edits within one owned insertion. New independent saved blocks go to the active list; recent exact undo/redo restores ownership without reviving earlier commit inclusion.
+- Store changelist metadata atomically in each worktree's own Git directory, with cross-process locking and revision checks for ownership, drafts and selected-commit leases. Independent windows read the same authoritative state.
+- Reconcile saved text after external staging, reset, commit, checkout and stash operations. Preserve unresolved ownership for review when edits overlap ambiguously, change both the base and local result, or become unsupported structural changes.
+
+### Fixed
+
+- Preserve explicit empty selections while mapping valid saved selections to current changes. Unknown ownership cannot silently fall through to a whole-file commit.
+- Back up workspace metadata before schema-3 migration, preserve IDs and drafts, refuse corrupt or conflicting migration records, and leave a sentinel that older clients reject.
+
 ## [0.38.1] - 2026-10-15
 
 This release adds the first changelist-management phase on top of 0.38.0. Four later implementation phases remain planned.

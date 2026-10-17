@@ -905,5 +905,11 @@
     "Selected changes were removed, but their list metadata needs review. Do not repeat the rollback.": "所选更改已移除，但列表元数据需要检查。请勿重复回滚。",
     "The selection is saved in shelf {name}, but its removal did not finish. Review the file and recovery before retrying.": "所选内容已保存到 Shelf {name}，但移除操作未完成。重试前请检查文件和恢复状态。",
     "Selected changes saved in shelf {name}.": "所选更改已保存到 Shelf {name}。",
-    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "所选操作已完成，但视图刷新失败。请重新打开编辑器后再进行其他操作。"
+    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "所选操作已完成，但视图刷新失败。请重新打开编辑器后再进行其他操作。",
+    "Commit partial text and structural changes separately.": "请分别提交部分文本更改和结构性更改。",
+    "Commit Whole Files": "提交整个文件",
+    "These deleted or renamed files have stale change assignments. Commit their complete changes?": "这些已删除或重命名文件的更改归组已过时。要提交它们的全部更改吗？",
+    "Open Partial Changes is only available for local files.": "只能为本地文件打开部分更改。",
+    "Open Partial Changes failed: {message}": "无法打开部分更改：{message}",
+    "Selected file is not in a known IntelliGit repository.": "所选文件不在 IntelliGit 已知的存储库中。"
 }

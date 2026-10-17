@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { changeIds, selectedContent, validateSelection } from "../changes/selection";
@@ -22,6 +22,10 @@ import {
     type PartialRecoveryIssue,
     type PartialTransactionFaults,
 } from "./partialIndexTransaction";
+
+/** Transaction-local readers keep whole-owned commits independent of the editor cache. */
+type PreparedCommitFile = { snapshot: PartialFileSnapshot; content: string };
+type ReadPreparedCommitFile = (index: number) => Promise<PreparedCommitFile>;
 
 type DirtyBufferGuard = (paths: readonly string[]) => void | Promise<void>;
 const MAX_SESSION_BYTES = 32 * 1024 * 1024;
@@ -82,7 +86,7 @@ export class PartialChanges {
         const snapshot = this.snapshot(selection.snapshotId);
         validateSelection(snapshot.view.blocks, selection.lineIds);
         if (!selection.lineIds.length) throw new Error("Select changes first.");
-        await this.assertCurrent([snapshot], guard);
+        await this.assertSnapshotCurrent(snapshot, guard);
     }
 
     /** Creates a Git patch for exactly the selected content; no real index or worktree is written. */
@@ -193,13 +197,13 @@ export class PartialChanges {
                     snapshot,
                     index,
                     undefined,
-                    () => this.assertCurrent([snapshot], guard),
+                    () => this.assertSnapshotCurrent(snapshot, guard),
                     faults,
                     {
                         path: snapshot.view.path,
                         before: original,
                         after,
-                        recheckAfter: () => this.assertCurrent([afterSnapshot], guard),
+                        recheckAfter: () => this.assertSnapshotCurrent(afterSnapshot, guard),
                     },
                 );
                 this.clear();
@@ -291,8 +295,94 @@ export class PartialChanges {
         ) {
             throw new Error("The selected commit exceeds its text budget.");
         }
+        return this.commitPreparedFiles(
+            paths,
+            (index) => Promise.resolve({ snapshot: snapshots[index], content: contents[index] }),
+            message,
+            assertNoDirtyBuffer,
+            faults,
+            options,
+        );
+    }
+
+    /**
+     * Commits complete owned text through the protected transaction without partial aggregate limits.
+     * The mandatory host predicate proves ownership; false returns before mutation for partial routing.
+     * Private disk snapshots bound memory and survive editor-cache eviction only for this transaction.
+     */
+    async tryCommitWholeFiles(
+        paths: readonly string[],
+        message: string,
+        ownsSnapshot: (snapshot: PartialFileSnapshot) => boolean,
+        assertNoDirtyBuffer: DirtyBufferGuard,
+        faults: PartialTransactionFaults = {},
+    ): Promise<string | undefined> {
+        if (!message.trim() || Buffer.byteLength(message, "utf8") > 256 * 1024) {
+            throw new Error("Enter a supported commit message.");
+        }
+        if (!paths.length) throw new Error("Select changes before committing.");
+        if (new Set(paths).size !== paths.length)
+            throw new Error("Duplicate partial-commit files.");
+        await this.recover();
+        const directory = await mkdtemp(path.join(tmpdir(), "intelligit-owned-snapshots-"));
+        try {
+            for (const [index, file] of paths.entries()) {
+                const snapshot = await readPartialSnapshot(
+                    this.executor,
+                    this.root,
+                    file,
+                    "working",
+                );
+                if (!ownsSnapshot(snapshot)) return undefined;
+                await writeFile(path.join(directory, String(index)), JSON.stringify(snapshot), {
+                    flag: "wx",
+                    mode: 0o600,
+                });
+            }
+            return await this.commitPreparedFiles(
+                paths,
+                async (index) => {
+                    const snapshot = JSON.parse(
+                        await readFile(path.join(directory, String(index)), "utf8"),
+                    ) as PartialFileSnapshot;
+                    return { snapshot, content: snapshot.working };
+                },
+                message,
+                assertNoDirtyBuffer,
+                faults,
+            );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    }
+
+    /** Shares hook/tree, snapshot, index/ref publication and recovery fences for both commit entries. */
+    private async commitPreparedFiles(
+        paths: readonly string[],
+        readPrepared: ReadPreparedCommitFile,
+        message: string,
+        assertNoDirtyBuffer: DirtyBufferGuard,
+        faults: PartialTransactionFaults,
+        options: { amend?: boolean } = {},
+    ): Promise<string> {
+        const first = (await readPrepared(0)).snapshot;
+        for (let index = 0; index < paths.length; index++) {
+            const { snapshot, content } = await readPrepared(index);
+            if (
+                snapshot.view.path !== paths[index] ||
+                snapshot.indexHash !== first.indexHash ||
+                snapshot.head !== first.head ||
+                snapshot.ref !== first.ref ||
+                snapshot.root !== first.root
+            ) {
+                throw new Error(
+                    "The selected files belong to different Git snapshots. Reopen their changes.",
+                );
+            }
+            assertContentSize(content);
+        }
         return this.executor.runWithinMutationGate(async () => {
-            await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+            await this.assertCurrent(paths, readPrepared, assertNoDirtyBuffer);
             const directory = await mkdtemp(path.join(tmpdir(), "intelligit-partial-commit-"));
             try {
                 const selectedIndex = path.join(directory, "selected-index");
@@ -302,14 +392,11 @@ export class PartialChanges {
                 });
                 await copyFile(first.indexPath, reconciledIndex);
                 await this.materializeIndex(reconciledIndex);
-                for (const [index, snapshot] of snapshots.entries()) {
+                for (let index = 0; index < paths.length; index++) {
+                    const { snapshot, content } = await readPrepared(index);
                     const fileDirectory = path.join(directory, String(index));
-                    const retained = await this.reconcileText(
-                        fileDirectory,
-                        snapshot,
-                        contents[index],
-                    );
-                    await this.writeBlob(selectedIndex, snapshot, contents[index]);
+                    const retained = await this.reconcileText(fileDirectory, snapshot, content);
+                    await this.writeBlob(selectedIndex, snapshot, content);
                     await this.writeBlob(reconciledIndex, snapshot, retained);
                 }
                 const expectedTree = await this.treeOf(selectedIndex);
@@ -327,14 +414,14 @@ export class PartialChanges {
                     expectedTree,
                     options,
                 );
-                await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+                await this.assertCurrent(paths, readPrepared, assertNoDirtyBuffer);
                 await publishPartialIndex(
                     this.executor,
                     first,
                     reconciledIndex,
                     commit,
                     async () => {
-                        await this.assertCurrent(snapshots, assertNoDirtyBuffer);
+                        await this.assertCurrent(paths, readPrepared, assertNoDirtyBuffer);
                     },
                     faults,
                 );
@@ -412,16 +499,34 @@ export class PartialChanges {
         this.bytes = 0;
     }
 
-    private async assertCurrent(
-        snapshots: readonly PartialFileSnapshot[],
+    /** Single-file operations share the same complete transaction fences as prepared commits. */
+    private assertSnapshotCurrent(
+        snapshot: PartialFileSnapshot,
         guard: DirtyBufferGuard,
     ): Promise<void> {
-        await guard(snapshots.map((snapshot) => snapshot.view.path));
-        await assertPartialSnapshotCurrent(this.executor, snapshots[0]);
-        await mapWithConcurrency(snapshots.slice(1), 6, (snapshot) =>
-            assertPartialSnapshotCurrent(this.executor, snapshot, false),
+        return this.assertCurrent(
+            [snapshot.view.path],
+            () => Promise.resolve({ snapshot, content: snapshot.working }),
+            guard,
         );
-        await guard(snapshots.map((snapshot) => snapshot.view.path));
+    }
+
+    /** Rechecks all captured files with bounded reads and metadata/dirty-buffer guards on both sides. */
+    private async assertCurrent(
+        paths: readonly string[],
+        readPrepared: ReadPreparedCommitFile,
+        guard: DirtyBufferGuard,
+    ): Promise<void> {
+        await guard(paths);
+        await assertPartialSnapshotCurrent(this.executor, (await readPrepared(0)).snapshot);
+        await mapWithConcurrency(paths.slice(1), 6, async (_file, index) =>
+            assertPartialSnapshotCurrent(
+                this.executor,
+                (await readPrepared(index + 1)).snapshot,
+                false,
+            ),
+        );
+        await guard(paths);
     }
 
     private async materializeIndex(index: string): Promise<void> {

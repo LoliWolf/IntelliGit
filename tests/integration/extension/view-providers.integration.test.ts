@@ -1,6 +1,7 @@
 import { ChangelistStore } from "../../../src/changes/changelistStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { removeScratchDirectories } from "../../helpers/scratchDirectories";
@@ -976,16 +977,20 @@ async function setupCommitPanelProvider(
         secrets?: ReturnType<typeof makeSecretStorage>;
         shelfService?: unknown;
         coordinator?: unknown;
+        root?: string;
     } = {},
 ) {
     const { CommitPanelViewProvider } = await import("../../../src/views/CommitPanelViewProvider");
-    const gitOps = makeGitOpsMock();
+    const gitOps = makeGitOpsMock(options.root);
     configure?.(gitOps);
     const draftStore = createMemento();
     const provider = new CommitPanelViewProvider(
         { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
         gitOps as unknown as object,
-        { fsPath: "/repo", path: "/repo" } as unknown as { fsPath: string; path: string },
+        { fsPath: options.root ?? "/repo", path: options.root ?? "/repo" } as unknown as {
+            fsPath: string;
+            path: string;
+        },
         draftStore as unknown as object,
         options.secrets as unknown as object,
         options.shelfService
@@ -1002,6 +1007,74 @@ async function setupCommitPanelProvider(
     );
     await webview.send({ type: "ready" });
     return { provider, gitOps, webview, draftStore };
+}
+
+/** Real Git repositories with distinct content and an unresolved normal Changes view. */
+async function nativePartialProviderFixture() {
+    const directory = await realpath(
+        await mkdtemp(path.join(tmpdir(), "intelligit-native-partial-")),
+    );
+    const roots = [path.join(directory, "a"), path.join(directory, "b")];
+    for (const root of roots) {
+        await mkdir(root);
+        const run = (args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+        run(["init", "-q"]);
+        run(["config", "user.name", "Native"]);
+        run(["config", "user.email", "native@example.invalid"]);
+        run(["config", "commit.gpgSign", "false"]);
+        await writeFile(path.join(root, "file.txt"), "base\n");
+        run(["add", "file.txt"]);
+        run(["commit", "-qm", "base"]);
+        await writeFile(path.join(root, "file.txt"), `repository ${path.basename(root)} change\n`);
+    }
+    const { GitExecutor } = await vi.importActual<typeof import("../../../src/git/executor")>(
+        "../../../src/git/executor",
+    );
+    const { GitOps } = await vi.importActual<typeof import("../../../src/git/operations")>(
+        "../../../src/git/operations",
+    );
+    const { ChangelistStore: CurrentStore } = await import("../../../src/changes/changelistStore");
+    const { CommitPanelViewProvider } = await import("../../../src/views/CommitPanelViewProvider");
+    const state = createMemento();
+    const executor = new GitExecutor(roots[0]);
+    const gitOps = new GitOps(executor);
+    const attached: string[] = [];
+    const provider = new CommitPanelViewProvider(
+        vscodeMock.Uri.file("/ext") as never,
+        gitOps,
+        vscodeMock.Uri.file(roots[0]) as never,
+        state as never,
+        undefined,
+        undefined,
+        true,
+        undefined,
+        undefined,
+        () => ({
+            ...createNoopNativeCommitInputBridge(),
+            attach: (root: string) => {
+                attached.push(root);
+            },
+        }),
+    );
+    provider.setRepositories(
+        roots.map((root) => ({ root, label: path.basename(root), kind: "repository" as const })),
+        roots[0],
+    );
+    await vi.waitFor(() => expect(attached).toEqual(expect.arrayContaining(roots)));
+    return {
+        directory,
+        roots,
+        provider,
+        executor,
+        gitOps,
+        state,
+        Store: CurrentStore,
+        dispose: async () => {
+            for (const panel of createdWebviewPanels) panel.dispose();
+            provider.dispose();
+            await removeScratchDirectories(directory);
+        },
+    };
 }
 
 describe("view providers integration", () => {
@@ -1060,6 +1133,140 @@ describe("view providers integration", () => {
             }) => Promise<void>;
             await nativeDelegate({ isCancellationRequested: false });
         });
+    });
+
+    it("native partial entry uses repository B while A is selected", async () => {
+        const fixture = await nativePartialProviderFixture();
+        const { ChangeWorkflowHost } = await import("../../../src/views/ChangeWorkflowHost");
+        const calls = vi.spyOn(ChangeWorkflowHost.prototype, "openFromEditor");
+        try {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                await fixture.provider.openPartialChanges(fixture.roots[1], "file.txt");
+                postMessageSpy.mockClear();
+                await createdWebviewPanels.at(-1)!.send({ type: "ready" });
+                const data = postMessageSpy.mock.calls
+                    .map(([message]) => message)
+                    .find((message) => message.type === "partialFile");
+                expect(data, "repository B must produce a usable partial panel").toMatchObject({
+                    listId: "all",
+                    file: { path: "file.txt" },
+                });
+                expect(
+                    JSON.stringify(data.file.blocks),
+                    "explicit repository B must win over selected A",
+                ).toContain("repository b change");
+                expect(JSON.stringify(data.file.blocks)).not.toContain("repository a change");
+            }
+            expect(
+                (fixture.provider as unknown as { activeRepositoryRoot: string })
+                    .activeRepositoryRoot,
+            ).toBe(fixture.roots[0]);
+            expect(calls.mock.instances[0], "native opens must reuse the root's workflow").toBe(
+                calls.mock.instances[1],
+            );
+        } finally {
+            calls.mockRestore();
+            await fixture.dispose();
+        }
+    });
+
+    it("native partial entry normalizes Git root spelling before runtime lookup", async () => {
+        const fixture = await nativePartialProviderFixture();
+        const gitRoot = `${fixture.roots[1].split(path.sep).join("/")}/.`;
+        try {
+            await expect(
+                fixture.provider.openPartialChanges(gitRoot, "file.txt"),
+                "Git root spelling must resolve the known repository",
+            ).resolves.toBeUndefined();
+            await createdWebviewPanels.at(-1)!.send({ type: "ready" });
+            expect(JSON.stringify(postMessageSpy.mock.calls)).toContain("repository b change");
+            expect(
+                (fixture.provider as unknown as { activeRepositoryRoot: string })
+                    .activeRepositoryRoot,
+            ).toBe(fixture.roots[0]);
+        } finally {
+            await fixture.dispose();
+        }
+    });
+
+    it("native partial entry rejects an unknown repository without opening a panel", async () => {
+        const fixture = await nativePartialProviderFixture();
+        try {
+            await expect(
+                fixture.provider.openPartialChanges(
+                    path.join(fixture.directory, "unknown"),
+                    "file.txt",
+                ),
+                "unknown roots must not fall back to the selected repository",
+            ).rejects.toThrow("known IntelliGit repository");
+            expect(createdWebviewPanels).toHaveLength(0);
+        } finally {
+            await fixture.dispose();
+        }
+    });
+
+    it("native partial entry works before the commit view is resolved", async () => {
+        const fixture = await nativePartialProviderFixture();
+        try {
+            await fixture.provider.openPartialChanges(fixture.roots[1], "file.txt");
+            await createdWebviewPanels.at(-1)!.send({ type: "ready" });
+            expect(postMessageSpy.mock.calls.map(([message]) => message)).toContainEqual(
+                expect.objectContaining({ type: "partialFile", listId: "all" }),
+            );
+            expect(JSON.stringify(postMessageSpy.mock.calls)).toContain("repository b change");
+        } finally {
+            await fixture.dispose();
+        }
+    });
+
+    it("native command reports hidden-view durable connection failure", async () => {
+        const fixture = await nativePartialProviderFixture();
+        const { registerRepositoryCommands } =
+            await import("../../../src/activation/repositoryCommands");
+        const contextCommands = await import("../../../src/commands/fileContextCommands");
+        const resolve = vi.spyOn(contextCommands, "resolveFileCommandContext").mockResolvedValue({
+            repoRoot: fixture.roots[1],
+            repoRelativePath: "file.txt",
+        } as never);
+        const connect = vi
+            .spyOn(fixture.Store.prototype, "connect")
+            .mockRejectedValueOnce(new Error("hidden-view durable failure"));
+        const translate = vi
+            .spyOn(vscodeMock.l10n, "t")
+            .mockImplementation((message, values) =>
+                message.replace(
+                    /\{([^}]+)\}/g,
+                    (match, key: string) =>
+                        (values as Record<string, string> | undefined)?.[key] ?? match,
+                ),
+            );
+        try {
+            registerRepositoryCommands({
+                context: { subscriptions: [], extensionUri: vscodeMock.Uri.file("/ext") },
+                executor: fixture.executor,
+                gitOps: fixture.gitOps,
+                worktreeService: {},
+                getRepoRoot: () => fixture.roots[0],
+                getCurrentBranches: () => [],
+                getCurrentBranchName: () => "main",
+                refreshService: () => ({}),
+                openPartialChanges: (root: string, file: string) =>
+                    fixture.provider.openPartialChanges(root, file),
+            } as never);
+            await registeredCommands.get("intelligit.openPartialChanges")?.(
+                vscodeMock.Uri.file(path.join(fixture.roots[1], "file.txt")),
+            );
+            expect(
+                showErrorMessage,
+                "hidden-view connection failure must reach native error UI",
+            ).toHaveBeenCalledWith(expect.stringContaining("hidden-view durable failure"));
+            expect(createdWebviewPanels).toHaveLength(0);
+        } finally {
+            translate.mockRestore();
+            connect.mockRestore();
+            resolve.mockRestore();
+            await fixture.dispose();
+        }
     });
 
     it("CommitPanelViewProvider sends one correlated generation request with its fresh validated snapshot", async () => {
@@ -2377,6 +2584,127 @@ describe("view providers integration", () => {
             }),
         ).resolves.toBe(false);
         provider.dispose();
+    });
+
+    it.each(
+        ["commit", "commitAndPush", "commitSelected"].flatMap((type) =>
+            ["same host", "second host"].map((writer) => [type, writer]),
+        ),
+    )(
+        "UndockedViewProvider preserves a newer aggregate draft during %s from %s",
+        async (type, writer) => {
+            const { UndockedViewProvider } =
+                await import("../../../src/views/UndockedViewProvider");
+            const gitOps = makeGitOpsMock();
+            gitOps.deriveFor.mockImplementation(() => gitOps);
+            let finishCommit!: () => void;
+            gitOps.commit.mockImplementation(
+                () =>
+                    new Promise<string>((resolve) => {
+                        finishCommit = () => resolve("ok");
+                    }),
+            );
+            const gitDir = await mkdtemp(path.join(tmpdir(), "intelligit-draft-hosts-"));
+            const workspaceStore = createMemento({ [`commitDraft:${gitDir}`]: "captured draft" });
+            const provider = createTestUndockedViewProvider(
+                UndockedViewProvider,
+                { fsPath: "/ext", path: "/ext" } as never,
+                gitOps as never,
+                { fsPath: gitDir, path: gitDir } as never,
+                makeCredentialStore() as never,
+                workspaceStore as never,
+            );
+            const testProvider = provider as unknown as {
+                panel: { webview: { postMessage: typeof postMessageSpy }; dispose: () => void };
+                handleMessage(message: unknown): Promise<void>;
+                nativeCommitInputBridge: { setFromPanel(root: string, message: string): void };
+            };
+            testProvider.panel = { webview: { postMessage: postMessageSpy }, dispose: vi.fn() };
+            const nativeMirror = vi.spyOn(testProvider.nativeCommitInputBridge, "setFromPanel");
+            try {
+                await ChangelistStore.forStorage(workspaceStore).connect(gitDir, gitDir);
+                const secondHost = new ChangelistStore(createMemento());
+                await secondHost.connect(gitDir, gitDir);
+                const commit = testProvider.handleMessage({
+                    type,
+                    message: "captured draft",
+                    amend: false,
+                    push: false,
+                    paths: ["src/a.ts"],
+                });
+                await flushMicrotasks();
+                expect(gitOps.commit).toHaveBeenCalled();
+                if (writer === "second host") {
+                    await secondHost.saveDraft(gitDir, "all", "captured draft", "newer draft");
+                } else {
+                    await testProvider.handleMessage({
+                        type: "saveCommitDraft",
+                        repositoryRoot: gitDir,
+                        message: "newer draft",
+                    });
+                }
+                finishCommit();
+                await commit;
+                expect(
+                    ChangelistStore.forStorage(workspaceStore).draft(gitDir, "all"),
+                    "commit completion must preserve the newer aggregate draft",
+                ).toBe("newer draft");
+                expect(nativeMirror).not.toHaveBeenCalledWith(gitDir, "");
+                expect(postMessageSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        type: "committed",
+                        clearCommitMessage: false,
+                    }),
+                );
+            } finally {
+                provider.dispose();
+                await removeScratchDirectories(gitDir);
+            }
+        },
+    );
+
+    it("UndockedViewProvider retains stored commit text when clearLastCommit is false", async () => {
+        commitChecksConfiguration.clearLastCommit = false;
+        const { UndockedViewProvider } = await import("../../../src/views/UndockedViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.deriveFor.mockImplementation(() => gitOps);
+        const workspaceStore = createMemento({ "commitDraft:/repo": "retained draft" });
+        const provider = createTestUndockedViewProvider(
+            UndockedViewProvider,
+            { fsPath: "/ext", path: "/ext" } as never,
+            gitOps as never,
+            { fsPath: "/repo", path: "/repo" } as never,
+            makeCredentialStore() as never,
+            workspaceStore as never,
+        );
+        const testProvider = provider as unknown as {
+            panel: { webview: { postMessage: typeof postMessageSpy }; dispose: () => void };
+            handleMessage(message: unknown): Promise<void>;
+            nativeCommitInputBridge: { setFromPanel(root: string, message: string): void };
+        };
+        testProvider.panel = { webview: { postMessage: postMessageSpy }, dispose: vi.fn() };
+        const nativeMirror = vi.spyOn(testProvider.nativeCommitInputBridge, "setFromPanel");
+        try {
+            for (const type of ["commit", "commitAndPush", "commitSelected"]) {
+                postMessageSpy.mockClear();
+                await testProvider.handleMessage({
+                    type,
+                    message: "retained draft",
+                    amend: false,
+                    push: false,
+                    paths: ["src/a.ts"],
+                });
+                expect(ChangelistStore.forStorage(workspaceStore).draft("/repo", "all")).toBe(
+                    "retained draft",
+                );
+                expect(postMessageSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({ type: "committed", clearCommitMessage: false }),
+                );
+            }
+            expect(nativeMirror).not.toHaveBeenCalledWith("/repo", "");
+        } finally {
+            provider.dispose();
+        }
     });
 
     it("UndockedViewProvider reports commit completion when draft cleanup rejects", async () => {
@@ -6878,6 +7206,72 @@ describe("view providers integration", () => {
         expect(executeCommand).not.toHaveBeenCalledWith("intelligit.publishBranch");
         provider.dispose();
     });
+
+    it.each(
+        ["commit", "commitAndPush", "commitSelected"].flatMap((type) =>
+            ["same host", "second host"].map((writer) => [type, writer]),
+        ),
+    )(
+        "CommitPanelViewProvider preserves a newer aggregate draft during %s from %s",
+        async (type, writer) => {
+            // Match the provider's module instance after the earlier hydration test resets modules.
+            const { ChangelistStore } = await import("../../../src/changes/changelistStore");
+            const gitDir = await mkdtemp(path.join(tmpdir(), "intelligit-draft-hosts-"));
+            const { provider, gitOps, webview, draftStore } = await setupCommitPanelProvider(
+                undefined,
+                { root: gitDir },
+            );
+            const bridge = (
+                provider as unknown as {
+                    nativeCommitInputBridge: { setFromPanel(root: string, message: string): void };
+                }
+            ).nativeCommitInputBridge;
+            const nativeMirror = vi.spyOn(bridge, "setFromPanel");
+            let finishCommit!: () => void;
+            gitOps.commit.mockImplementation(
+                () =>
+                    new Promise<string>((resolve) => {
+                        finishCommit = () => resolve("ok");
+                    }),
+            );
+            try {
+                await webview.send({ type: "saveCommitDraft", message: "captured draft" });
+                await ChangelistStore.forStorage(draftStore).connect(gitDir, gitDir);
+                const secondHost = new ChangelistStore(createMemento());
+                await secondHost.connect(gitDir, gitDir);
+                const commit = webview.send({
+                    type,
+                    message: "captured draft",
+                    amend: false,
+                    push: false,
+                    paths: ["src/a.ts"],
+                });
+                await flushMicrotasks();
+                expect(gitOps.commit).toHaveBeenCalled();
+                if (writer === "second host") {
+                    await secondHost.saveDraft(gitDir, "all", "captured draft", "newer draft");
+                } else {
+                    await webview.send({ type: "saveCommitDraft", message: "newer draft" });
+                }
+                finishCommit();
+                await commit;
+                expect(
+                    ChangelistStore.forStorage(draftStore).draft(gitDir, "all"),
+                    "commit completion must preserve the newer aggregate draft",
+                ).toBe("newer draft");
+                expect(nativeMirror).not.toHaveBeenCalledWith(gitDir, "");
+                expect(postMessageSpy).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        type: "committed",
+                        clearCommitMessage: false,
+                    }),
+                );
+            } finally {
+                provider.dispose();
+                await removeScratchDirectories(gitDir);
+            }
+        },
+    );
 
     it("CommitPanelViewProvider clears stored commit text after successful commit flows by default", async () => {
         const { provider, gitOps, webview, draftStore } = await setupCommitPanelProvider();

@@ -905,5 +905,11 @@
     "Selected changes were removed, but their list metadata needs review. Do not repeat the rollback.": "Se retiraron los cambios seleccionados, pero sus metadatos de lista requieren revisión. No repita la reversión.",
     "The selection is saved in shelf {name}, but its removal did not finish. Review the file and recovery before retrying.": "La selección se guardó en el Shelf {name}, pero no terminó de retirarse. Revise el archivo y la recuperación antes de reintentar.",
     "Selected changes saved in shelf {name}.": "Cambios seleccionados guardados en el Shelf {name}.",
-    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "La operación seleccionada terminó, pero no se pudo actualizar la vista. Vuelva a abrir el editor antes de otra operación."
+    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "La operación seleccionada terminó, pero no se pudo actualizar la vista. Vuelva a abrir el editor antes de otra operación.",
+    "Commit partial text and structural changes separately.": "Haz commit de los cambios parciales de texto y los cambios estructurales por separado.",
+    "Commit Whole Files": "Hacer commit de archivos completos",
+    "These deleted or renamed files have stale change assignments. Commit their complete changes?": "Estos archivos eliminados o renombrados tienen asignaciones de cambios desactualizadas. ¿Hacer commit de todos sus cambios?",
+    "Open Partial Changes is only available for local files.": "Los cambios parciales solo se pueden abrir para archivos locales.",
+    "Open Partial Changes failed: {message}": "No se pudieron abrir los cambios parciales: {message}",
+    "Selected file is not in a known IntelliGit repository.": "El archivo seleccionado no está en un repositorio conocido de IntelliGit."
 }

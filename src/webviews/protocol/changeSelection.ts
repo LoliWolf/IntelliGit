@@ -44,6 +44,10 @@ export interface ChangeOwnership {
     lines: Record<string, string>;
     stale?: boolean;
     totalChanges?: number;
+    /** Host-only hashed evidence; omitted from browser projections. */
+    tracking?: RangeSnapshotReference;
+    /** Bounded exact-content history restores ownership on undo/redo, never inclusion. */
+    history?: { snapshot: RangeSnapshotReference; lines: Record<string, string> }[];
     selections?: Record<
         string,
         {
@@ -54,6 +58,36 @@ export interface ChangeOwnership {
             reviewRequired?: boolean;
         }
     >;
+}
+
+/** Host-only immutable evidence identity; ownership remains in the compact manifest. */
+export interface RangeSnapshotReference {
+    blob: string;
+    contentId: string;
+    baseHash: string;
+    workingHash: string;
+    head: string;
+    indexHash: string;
+    anchorCount: number;
+}
+
+/** Immutable evidence for mapping logical changes; no source text is persisted. */
+export interface RangeSnapshot {
+    contentId: string;
+    baseHash: string;
+    workingHash: string;
+    head: string;
+    indexHash: string;
+    baseLines: string[];
+    workingLines: string[];
+    anchors: {
+        id: string;
+        fingerprint: string;
+        kind: "add" | "remove";
+        line: number;
+        hash: string;
+        context: string[];
+    }[];
 }
 
 /** Revisioned host-owned lists for one captured repository. */

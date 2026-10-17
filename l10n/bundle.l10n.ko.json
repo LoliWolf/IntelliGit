@@ -905,5 +905,11 @@
     "Selected changes were removed, but their list metadata needs review. Do not repeat the rollback.": "선택한 변경은 제거되었지만 목록 메타데이터를 검토해야 합니다. 롤백을 반복하지 마세요.",
     "The selection is saved in shelf {name}, but its removal did not finish. Review the file and recovery before retrying.": "선택 내용은 Shelf {name}에 저장되었지만 제거가 완료되지 않았습니다. 재시도 전에 파일과 복구 상태를 검토하세요.",
     "Selected changes saved in shelf {name}.": "선택한 변경을 Shelf {name}에 저장했습니다.",
-    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "선택한 작업은 완료되었지만 보기를 새로 고칠 수 없습니다. 다음 작업 전에 편집기를 다시 여세요."
+    "The selected operation completed, but its view could not be refreshed. Reopen the editor before another operation.": "선택한 작업은 완료되었지만 보기를 새로 고칠 수 없습니다. 다음 작업 전에 편집기를 다시 여세요.",
+    "Commit partial text and structural changes separately.": "텍스트의 부분 변경과 구조적 변경을 별도로 커밋하세요.",
+    "Commit Whole Files": "파일 전체 커밋",
+    "These deleted or renamed files have stale change assignments. Commit their complete changes?": "삭제되거나 이름이 변경된 이 파일들의 변경 할당이 오래되었습니다. 파일의 모든 변경을 커밋할까요?",
+    "Open Partial Changes is only available for local files.": "부분 변경은 로컬 파일에서만 열 수 있습니다.",
+    "Open Partial Changes failed: {message}": "부분 변경을 열지 못했습니다: {message}",
+    "Selected file is not in a known IntelliGit repository.": "선택한 파일이 IntelliGit에서 인식하는 저장소에 없습니다."
 }

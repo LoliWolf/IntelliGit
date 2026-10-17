@@ -292,8 +292,14 @@ test.describe("installed VSIX package smoke", () => {
             expect(await runGitRaw(workspacePath, ["ls-files", "-u"], environment)).not.toBe("");
             await new Workbench(window).runCommand("Open Conflict Session");
             const conflicts = await intelliGitView.revealConflictSession();
-            await expect(conflicts.locator("tbody tr.row")).toHaveCount(1);
-            await conflicts.locator("tbody tr.row").click();
+            const conflictedRow = conflicts.locator("tbody tr.row");
+            await expect(conflictedRow).toHaveCount(1);
+            await expect(conflictedRow).toHaveAttribute("aria-selected", "true");
+            await expect(conflictedRow).toContainText("package-smoke.ts");
+            // Exercise the chooser's explicit action; native row-click opening has its own E2E coverage.
+            await conflicts
+                .getByRole("button", { name: en["mergeSession.merge"], exact: true })
+                .click();
             const merge = await intelliGitView.revealMergeWorkbench();
             await expect(
                 merge.locator('[data-testid="merge-editor-1"] .cm-content'),
