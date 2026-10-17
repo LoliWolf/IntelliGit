@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { GitOps } from "../git/operations";
 import type { PartialChanges } from "../git/partialChanges";
-import { ChangelistStore } from "../changes/changelistStore";
+import { ChangelistRevisionError, ChangelistStore } from "../changes/changelistStore";
 import { changeIds, validateSelection } from "../changes/selection";
 import type { ChangelistReply, ChangelistOutbound } from "../webviews/protocol/changelists";
 import type { SelectedFileChanges } from "../webviews/protocol/changeSelection";
@@ -16,6 +16,8 @@ import { showTimedWarningMessage } from "../utils/notifications";
 import { PartialIndexPublicationError } from "../git/partialIndexTransaction";
 import type { ChangelistState } from "../webviews/protocol/changeSelection";
 import type { PartialFileSnapshot } from "../git/partialSnapshot";
+import { ChangeRangeTracker } from "../changes/changeRangeTracker";
+import { rangeSnapshot } from "../changes/rangeMapping";
 
 interface ChangeWorkflowDeps {
     root: string;
@@ -53,42 +55,98 @@ export class ChangeWorkflowHost {
     private readonly partial: PartialChanges;
     private readonly unsubscribe: () => void;
     private committing = false;
+    private reconciling = 0;
+    private readonly tracker: ChangeRangeTracker;
+    private connected?: Promise<void>;
+    private readonly poll: ReturnType<typeof setInterval>;
+    private lastRevision = -1;
+    private lastPollError?: string;
 
-    /** Shares workspace metadata while each provider retains its own root-bound Git facade. */
+    /**
+     * Shares metadata through a root-bound Git facade and polls until disposal.
+     * Repeated poll failures are reported once per message until a successful read.
+     */
     constructor(private readonly deps: ChangeWorkflowDeps) {
         this.store = ChangelistStore.forStorage(deps.workspaceState);
         this.partial = deps.gitOps.partialChangesFor(deps.root);
-        this.unsubscribe = this.store.subscribe((root, state) => {
+        this.tracker = new ChangeRangeTracker(deps.root, this.partial, this.store);
+        this.unsubscribe = this.store.subscribe((root) => {
             if (root === this.deps.root)
                 this.deps.post({
                     type: "setChangelists",
                     repositoryRoot: root,
-                    state,
-                    busy: this.committing || this.store.isCommitting(root),
+                    state: this.store.view(root),
+                    busy: this.reconciling > 0 || this.committing || this.store.isCommitting(root),
                     ...(this.partial.recoveryIssues().length ? { hasRecoveryIssues: true } : {}),
                 });
         });
+        this.poll = setInterval(() => {
+            if (!this.connected) return;
+            try {
+                const revision = this.store.get(deps.root).revision;
+                this.lastPollError = undefined;
+                if (revision !== this.lastRevision) {
+                    this.lastRevision = revision;
+                    this.post();
+                }
+            } catch (error) {
+                const message = getErrorMessage(error);
+                if (message === this.lastPollError) return;
+                this.lastPollError = message;
+                this.deps.post({
+                    type: "error",
+                    repositoryRoot: deps.root,
+                    message: vscode.l10n.t("Changelist action failed: {message}", { message }),
+                });
+            }
+        }, 1000);
+        this.poll.unref();
     }
 
     /** Releases provider delivery; already-open editors still own their captured root. */
     dispose(): void {
         this.unsubscribe();
+        clearInterval(this.poll);
     }
 
-    /** Updates membership from an already acquired status snapshot without another Git scan. */
+    /** Durable migration is awaited before host intents can mutate metadata or Git. */
+    private connect(): Promise<void> {
+        this.connected ??= this.deps.gitOps
+            .getGitDirectories()
+            .then(({ gitDir }) => this.store.connect(this.deps.root, gitDir))
+            .catch((error: unknown) => {
+                this.connected = undefined;
+                throw error;
+            });
+        return this.connected;
+    }
+
+    /** Keeps actions busy through overlapping range observations and membership updates. */
     async reconcile(files: readonly WorkingFile[]): Promise<void> {
-        await this.store.reconcileFiles(
-            this.deps.root,
-            files.filter((file) => file.status !== "!").map((file) => file.path),
-        );
-        this.post();
+        this.reconciling++;
+        try {
+            await this.connect();
+            this.post();
+            if (this.store.isCommitting(this.deps.root)) return;
+            await this.tracker.reconcile(files);
+            await this.store.reconcileFiles(
+                this.deps.root,
+                files.filter((file) => file.status !== "!").map((file) => file.path),
+            );
+        } finally {
+            this.reconciling--;
+            this.post();
+        }
     }
 
-    /** Validates repository identity before metadata dialogs or Git actions. */
+    /** Validates repository identity and keeps initial recovery/loading busy before allowing actions. */
     async handle(raw: Record<string, unknown>): Promise<void> {
         if (raw.repositoryRoot !== this.deps.root)
             throw new Error("Unknown changelist repository.");
+        const loading = raw.type === "loadChangelists";
+        if (loading) this.reconciling++;
         try {
+            await this.connect();
             const message = raw as unknown as ChangelistOutbound;
             switch (message.type) {
                 case "loadChangelists": {
@@ -162,17 +220,22 @@ export class ChangeWorkflowHost {
                 }),
             });
         } finally {
+            if (loading) this.reconciling--;
             this.post();
         }
     }
 
+    /** Reports this root's authoritative metadata, cross-host busy state, and recovery needs; read failures stay root-scoped. */
     private post(): void {
         try {
             this.deps.post({
                 type: "setChangelists",
                 repositoryRoot: this.deps.root,
-                state: this.store.get(this.deps.root),
-                busy: this.committing || this.store.isCommitting(this.deps.root),
+                state: this.store.view(this.deps.root),
+                busy:
+                    this.reconciling > 0 ||
+                    this.committing ||
+                    this.store.isCommitting(this.deps.root),
                 ...(this.partial.recoveryIssues().length ? { hasRecoveryIssues: true } : {}),
             });
         } catch (error) {
@@ -186,16 +249,31 @@ export class ChangeWorkflowHost {
         }
     }
 
+    /** Hold the metadata lease across Git publication; release failures never invite a duplicate commit. */
     private async runCommit(operation: () => Promise<void>): Promise<void> {
         if (this.committing) throw new Error("A selected commit is already in progress.");
         this.committing = true;
         this.post();
-        let release: (() => void) | undefined;
+        let release: (() => Promise<void>) | undefined;
+        let completed = false;
         try {
             release = await this.store.beginCommit(this.deps.root);
-            await this.deps.runCommit(operation);
+            await this.deps.runCommit(async () => {
+                await operation();
+                completed = true;
+            });
         } finally {
-            release?.();
+            try {
+                await release?.();
+            } catch (error) {
+                console.error("[IntelliGit] Changelist lease release failed:", error);
+                if (completed)
+                    this.warnCommitReview(
+                        vscode.l10n.t(
+                            "Selected commit succeeded, but its selection metadata needs review. Do not retry the commit.",
+                        ),
+                    );
+            }
             this.committing = false;
             this.post();
         }
@@ -220,7 +298,7 @@ export class ChangeWorkflowHost {
                 await this.editList(message.action, revision, id);
                 break;
             case "activate":
-                await this.store.activate(this.deps.root, revision, id);
+                await this.activate(revision, id);
                 break;
             case "resetSelection":
                 await this.store.resetSelection(
@@ -270,6 +348,18 @@ export class ChangeWorkflowHost {
             default:
                 throw new Error("Unknown changelist action.");
         }
+    }
+
+    /** Observe existing edits under the old active list before changing only future attribution. */
+    private async activate(revision: number, id: string): Promise<void> {
+        const before = this.store.get(this.deps.root);
+        if (before.revision !== revision) throw new ChangelistRevisionError();
+        await this.tracker.reconcile(await this.deps.gitOps.getStatus({ withStats: false }));
+        const latest = this.store.get(this.deps.root);
+        // Observation may advance ownership revisions itself. Preserve those writes, but
+        // never overwrite another window's intervening active-list choice.
+        if (latest.activeId !== before.activeId) throw new ChangelistRevisionError();
+        await this.store.activate(this.deps.root, latest.revision, id);
     }
 
     /** Collects all metadata before a single CAS write, so cancelling any prompt changes nothing. */
@@ -423,19 +513,34 @@ export class ChangeWorkflowHost {
     private open(file: string, requestedList: string | undefined): void {
         const listId = requestedList ?? "all";
         new PartialChangesPanel(this.deps.extensionUri, file, {
+            /** Tracks loaded working bytes, tolerating a revision race only when authoritative content already matches. */
             load: async (side) => {
+                const revision = this.store.get(this.deps.root).revision;
                 const view = await this.partial.open(file, side);
                 const snapshot = this.partial.snapshot(view.snapshotId);
-                if (side === "working")
-                    await this.store.registerChanges(
-                        this.deps.root,
-                        view.path,
-                        snapshot.contentId,
-                        changeIds(view.blocks).length,
-                    );
-                const lists = this.store.get(this.deps.root);
+                if (side === "working") {
+                    try {
+                        await this.store.track(
+                            this.deps.root,
+                            view.path,
+                            rangeSnapshot(snapshot),
+                            revision,
+                        );
+                    } catch (error) {
+                        // A concurrent observer/draft writer need not prevent a read-only load
+                        // when the authoritative record already describes these exact bytes.
+                        if (
+                            !(error instanceof ChangelistRevisionError) ||
+                            this.store.get(this.deps.root).changes[view.path]?.contentId !==
+                                snapshot.contentId
+                        )
+                            throw error;
+                    }
+                }
+                const lists = this.store.view(this.deps.root);
                 return { file: view, contentId: snapshot.contentId, lists, listId };
             },
+            /** Holds the metadata lease across staging and restores prepared inclusion when an unpublished operation fails. */
             stage: async (selection) => {
                 const snapshot = this.assertFileSelection(file, selection);
                 const release = await this.store.beginCommit(this.deps.root);
@@ -475,7 +580,7 @@ export class ChangeWorkflowHost {
                         throw error;
                     }
                 } finally {
-                    release();
+                    await release();
                 }
                 await this.deps.actions.refreshData();
                 this.deps.actions.fireWorkingTreeChanged();
@@ -581,7 +686,145 @@ export class ChangeWorkflowHost {
         return snapshot;
     }
 
-    /** Checks list identity and revision, then commits exact whole-file or partial inclusion; stale ranges and partial amend are refused. */
+    /** Keeps exact inclusion and ownership fences while obtaining review for stale structural files. */
+    private async reviewCommitPaths(
+        paths: readonly string[],
+        state: ChangelistState,
+        id: string,
+        amend: boolean,
+    ): Promise<"partial" | "whole" | "cancelled"> {
+        const structural = new Map<string, WorkingFile>();
+        let structuralStatus: WorkingFile[] = [];
+        if (paths.some((file) => state.changes[file]?.stale)) {
+            const status = await this.deps.gitOps.getStatus({ withStats: false });
+            for (const file of status) {
+                if (
+                    paths.includes(file.path) &&
+                    state.changes[file.path]?.stale &&
+                    (file.status === "D" || file.status === "R")
+                )
+                    structural.set(file.path, file);
+            }
+            structuralStatus = status.filter((file) => structural.has(file.path));
+        }
+        const hasPartial = paths.some(
+            (file) =>
+                state.changes[file]?.selections?.[id] !== undefined ||
+                (!structural.has(file) &&
+                    (state.changes[file]?.stale ||
+                        (id !== "all" && state.changes[file]?.tracking !== undefined) ||
+                        Object.keys(state.changes[file]?.lines ?? {}).length > 0)),
+        );
+        if (
+            structural.size &&
+            (hasPartial ||
+                [...structural.values()].some(
+                    ({ sourcePath }) =>
+                        sourcePath && state.changes[sourcePath]?.selections?.[id] !== undefined,
+                ))
+        )
+            throw new Error(
+                vscode.l10n.t("Commit partial text and structural changes separately."),
+            );
+        if (hasPartial) {
+            if (amend) throw new Error("Partial amend requires the whole-file commit workflow.");
+            if (paths.length > 64) throw new Error("Select 1 to 64 text files.");
+            return "partial";
+        }
+        if (id !== "all" && paths.some((file) => state.files[file] !== id))
+            throw new Error("The files belong to another changelist.");
+        if (!structural.size) return "whole";
+        if (
+            id !== "all" &&
+            [...structural.values()].some((file) =>
+                [file.path, ...(file.sourcePath ? [file.sourcePath] : [])].some(
+                    (name) =>
+                        (state.files[name] !== undefined && state.files[name] !== id) ||
+                        Object.values(state.changes[name]?.lines ?? {}).some(
+                            (owner) => owner !== id,
+                        ),
+                ),
+            )
+        )
+            throw new Error("The files belong to another changelist.");
+        const confirmLabel = vscode.l10n.t("Commit Whole Files");
+        const confirm = await vscode.window.showWarningMessage(
+            vscode.l10n.t(
+                "These deleted or renamed files have stale change assignments. Commit their complete changes?",
+            ),
+            { modal: true, detail: paths.join("\n") },
+            confirmLabel,
+        );
+        if (confirm !== confirmLabel) return "cancelled";
+        const latest = await this.deps.gitOps.getStatus({ withStats: false });
+        if (
+            this.store.get(this.deps.root).revision !== state.revision ||
+            JSON.stringify(latest.filter((file) => structural.has(file.path))) !==
+                JSON.stringify(structuralStatus)
+        )
+            throw new Error("Changelists changed. Refresh before committing.");
+        return "whole";
+    }
+
+    /** Whole-owned tracked text uses exact transaction fences without manufacturing partial inclusion. */
+    private async tryCommitWholeOwned(
+        paths: readonly string[],
+        state: ChangelistState,
+        id: string,
+        message: Extract<ChangelistOutbound, { type: "commitChangelist" }>,
+    ): Promise<boolean> {
+        if (
+            id === "all" ||
+            message.amend === true ||
+            !paths.length ||
+            !paths.every((file) => {
+                const ownership = state.changes[file];
+                return (
+                    ownership?.tracking &&
+                    !ownership.stale &&
+                    ownership.selections?.[id] === undefined
+                );
+            })
+        )
+            return false;
+        const consumed: { path: string; fingerprints: ReadonlySet<string> }[] = [];
+        const commit = await this.partial.tryCommitWholeFiles(
+            paths,
+            assertString(message.message, "message"),
+            (snapshot) => {
+                const file = snapshot.view.path;
+                const ownership = state.changes[file];
+                if (ownership.contentId !== snapshot.contentId)
+                    throw new Error("Change assignments need review. Reopen the partial editor.");
+                const fallback = state.files[file] ?? state.activeId;
+                const lines = snapshot.view.blocks
+                    .flatMap((block) => block.lines)
+                    .filter((line) => line.kind !== "context");
+                if (
+                    !lines.length ||
+                    lines.some((line) => (ownership.lines[line.fingerprint] ?? fallback) !== id)
+                )
+                    return false;
+                consumed.push({
+                    path: file,
+                    fingerprints: new Set(lines.map((line) => line.fingerprint)),
+                });
+                return true;
+            },
+            async (files) => {
+                if (this.store.get(this.deps.root).revision !== state.revision)
+                    throw new Error("Changelists changed during commit preparation.");
+                await assertChangeBuffersSaved(this.deps.root, files);
+            },
+        );
+        if (commit === undefined) return false;
+        await this.consumeSelection(consumed, id);
+        await this.afterCommit(id, message.message);
+        if (message.push === true) await runGitOperationFromPanel(this.deps.actions, "push");
+        return true;
+    }
+
+    /** Checks list/revision and exact inclusion; stale structural files require review, while tracked text keeps snapshot fences. */
     private async commitList(
         message: Extract<ChangelistOutbound, { type: "commitChangelist" }>,
     ): Promise<void> {
@@ -592,14 +835,10 @@ export class ChangeWorkflowHost {
         const id = assertString(message.listId, "listId");
         if (id !== "all" && !state.lists.some((list) => list.id === id))
             throw new Error("Unknown changelist.");
-        const hasPartial = paths.some(
-            (file) =>
-                Object.keys(state.changes[file]?.lines ?? {}).length > 0 ||
-                state.changes[file]?.selections?.[id] !== undefined,
-        );
-        if (!hasPartial) {
-            if (id !== "all" && paths.some((file) => state.files[file] !== id))
-                throw new Error("The files belong to another changelist.");
+        if (await this.tryCommitWholeOwned(paths, state, id, message)) return;
+        const route = await this.reviewCommitPaths(paths, state, id, message.amend === true);
+        if (route === "cancelled") return;
+        if (route === "whole") {
             await commitSelectedFromPanel(
                 {
                     ...this.deps.actions,
@@ -615,9 +854,6 @@ export class ChangeWorkflowHost {
             );
             return;
         }
-        if (message.amend)
-            throw new Error("Partial amend requires the whole-file commit workflow.");
-        if (paths.length > 64) throw new Error("Select 1 to 64 text files.");
         const selections: SelectedFileChanges[] = [];
         let initialSnapshot: PartialFileSnapshot | undefined;
         const inclusions: {
@@ -628,6 +864,8 @@ export class ChangeWorkflowHost {
         }[] = [];
         const consumed: { path: string; fingerprints: ReadonlySet<string> }[] = [];
         for (const file of paths) {
+            if (state.changes[file]?.stale)
+                throw new Error("Change assignments need review. Reopen the partial editor.");
             const view = await this.partial.open(file);
             const snapshot = this.partial.snapshot(view.snapshotId);
             initialSnapshot ??= snapshot;
@@ -767,6 +1005,7 @@ export class ChangeWorkflowHost {
         }
     }
 
+    /** Removes consumed ownership against fresh remaining changes; cleanup failure requests review without undoing the commit. */
     private async consumeSelection(
         files: readonly { path: string; fingerprints: ReadonlySet<string> }[],
         scope: string,
@@ -789,6 +1028,7 @@ export class ChangeWorkflowHost {
                     file.fingerprints,
                     available,
                     changeIds(view.blocks).length,
+                    rangeSnapshot(snapshot),
                 );
             }
         } catch (error) {

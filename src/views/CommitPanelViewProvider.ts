@@ -1,5 +1,6 @@
 import { ChangelistStore } from "../changes/changelistStore";
 import {
+    attachAfterChangelistLoad,
     changelistDraftBridge,
     saveAggregateDraft,
     readAggregateDraft,
@@ -455,7 +456,15 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             );
             runtime.lastKnownChangedFileCount = this.getStoredChangedFileCount(runtime);
             this.runtimes.set(repository.root, runtime);
-            this.nativeCommitInputBridge.attach(repository.root);
+            attachAfterChangelistLoad(
+                this.workspaceState,
+                repository.root,
+                () => gitOps.getGitDirectories(),
+                () => {
+                    if (this.runtimes.get(repository.root) === runtime)
+                        this.nativeCommitInputBridge.attach(repository.root);
+                },
+            );
         }
 
         this.repositories = repositories;
@@ -955,8 +964,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             : undefined;
     }
 
-    /** Captures repository-specific commit callbacks; All draft clearing is mirrored only after persistence succeeds. */
+    /** Captures root and draft before asynchronous actions; newer drafts never receive the clear signal. */
     private actionDepsForRuntime(runtime?: CommitPanelRepositoryRuntime) {
+        const expectedDraft = this.getStoredCommitDraft(runtime);
         return {
             gitOps: runtime?.gitOps ?? this.gitOps,
             refreshData: () => (runtime ? this.refreshData(false, runtime) : Promise.resolve()),
@@ -965,6 +975,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     ? this.refreshGraphData(runtime)
                     : Promise.resolve(),
             fireWorkingTreeChanged: () => this._onDidChangeWorkingTree.fire(),
+            /** Clears mirrored input only after unchanged captured text is durably cleared; newer drafts survive completion. */
             postCommitted: async () => {
                 let clearCommitMessage =
                     vscode.workspace
@@ -976,6 +987,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                             this.workspaceState,
                             this.getCommitDraftStorageKey(runtime),
                             "",
+                            expectedDraft,
                         );
                     } catch {
                         clearCommitMessage = false;

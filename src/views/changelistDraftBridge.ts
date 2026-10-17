@@ -2,6 +2,26 @@ import { ChangelistStore } from "../changes/changelistStore";
 import type { NativeCommitInputBridgeOptions } from "./nativeCommitInputBridge";
 import type * as vscode from "vscode";
 
+/** Attach native inputs only after durable drafts are loaded; failures preserve the native buffer. */
+export function attachAfterChangelistLoad(
+    storage: vscode.Memento | undefined,
+    root: string,
+    directories: () => Promise<{ gitDir: string }>,
+    attach: () => void,
+): void {
+    const store = ChangelistStore.forStorage(storage);
+    if (!store.needsConnection(root)) {
+        attach();
+        return;
+    }
+    void directories()
+        .then(({ gitDir }) => store.connect(root, gitDir))
+        .then(attach)
+        .catch((error: unknown) => {
+            console.error("[IntelliGit] Native changelist drafts require review:", error);
+        });
+}
+
 /** Native SCM mirrors the last focused scope, shared by docked and undocked providers. */
 export function changelistDraftBridge(
     storage: vscode.Memento | undefined,
@@ -10,6 +30,7 @@ export function changelistDraftBridge(
     const store = ChangelistStore.forStorage(storage);
     const pending = new Map<string, { text: string }>();
     return {
+        /** Reads the focused scope, preserving the legacy draft when durable metadata is refused. */
         readDraft: (root) => {
             try {
                 return store.draft(root, store.mirrorScope(root));
@@ -17,6 +38,7 @@ export function changelistDraftBridge(
                 return readLegacyDraft(storage, `commitDraft:${root}`);
             }
         },
+        /** Saves against the captured scope and pending draft; failed writes never clear a newer edit. */
         persistDraft: (root, text) => {
             // Capture before enqueueing: a later focus/root change cannot redirect this native edit.
             const scope = store.mirrorScope(root);
@@ -37,6 +59,7 @@ export function changelistDraftBridge(
                     if (pending.get(key) === edit) pending.delete(key);
                 });
         },
+        /** Mirrors All only after pending persistence settles; named-list edits stay in their scope. */
         onNativeChange: (root, text) => {
             if (
                 !pending.has(JSON.stringify([root, store.mirrorScope(root)])) &&
@@ -47,16 +70,17 @@ export function changelistDraftBridge(
     };
 }
 
-/** Compatibility composer events have no list identity and therefore address All only. */
+/** Compatibility composers address All; an expected draft fences delayed commit cleanup. */
 export function saveAggregateDraft(
     storage: vscode.Memento | undefined,
     storageKey: string,
     text: string,
+    expected?: string,
 ): Promise<unknown> {
     if (!storageKey.startsWith("commitDraft:"))
         throw new Error("Unknown commit draft storage key.");
     const root = storageKey.slice("commitDraft:".length);
-    return ChangelistStore.forStorage(storage).saveDraft(root, "all", undefined, text);
+    return ChangelistStore.forStorage(storage).saveDraft(root, "all", expected, text);
 }
 
 /**
