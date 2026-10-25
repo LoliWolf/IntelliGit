@@ -17,6 +17,7 @@ import {
     VscArrowDown,
     VscArrowRight,
     VscDiff,
+    VscOpenPreview,
 } from "react-icons/vsc";
 import { getVsCodeApi } from "../shared/vscodeApi";
 import { t } from "../shared/i18n";
@@ -33,6 +34,7 @@ interface SavedSelection {
     contentId?: string;
     ids?: string[];
     message?: string;
+    showPreview?: boolean;
 }
 type DiffRow = { kind: "block"; block: ChangeBlock } | { kind: "line"; line: ChangeLine };
 const ROW_HEIGHT = 22;
@@ -97,6 +99,30 @@ function SelectionPreview({ content, filePath }: { content: string; filePath: st
         }
     }, [content]);
     return <div ref={root} className="partial-preview" />;
+}
+
+/** Unmounted while hidden, so toggling lines never rebuilds a file nobody is looking at. */
+function PreviewPane({
+    shown,
+    data,
+    selected,
+}: {
+    shown: boolean;
+    data: FileData | null;
+    selected: ReadonlySet<string>;
+}) {
+    const content = useMemo(
+        () =>
+            shown && data ? selectedContent(data.file.base, data.file.blocks, [...selected]) : "",
+        [shown, data, selected],
+    );
+    if (!shown) return null;
+    return (
+        <section className="partial-pane">
+            <div className="partial-pane-title">{t("changes.preview")}</div>
+            <SelectionPreview content={content} filePath={data?.file.path ?? ""} />
+        </section>
+    );
 }
 
 /** Virtual rows keep even large ordinary-text diffs bounded in DOM size. */
@@ -207,7 +233,8 @@ function PartialStatus({ data, error }: { data: FileData | null; error: string }
                     {error}
                 </div>
             ) : null}
-            {ownership?.stale ? (
+            {/* With one list every line already belongs to it, so there is nothing to review. */}
+            {ownership?.stale && (data?.lists.lists.length ?? 0) > 1 ? (
                 <div className="partial-status" role="status">
                     {t("changes.reviewAssignments")}
                 </div>
@@ -280,6 +307,43 @@ function SelectedShelfActions({
     );
 }
 
+/** Assigning lines needs somewhere else to send them, so one list shows no assign controls. */
+function AssignActions({
+    lists,
+    targetList,
+    assignable,
+    onTargetChange,
+    onAssign,
+}: {
+    lists: readonly { id: string; name: string }[];
+    targetList: string;
+    assignable: boolean;
+    onTargetChange: (id: string) => void;
+    onAssign: () => void;
+}) {
+    if (lists.length < 2) return null;
+    return (
+        <>
+            <select
+                aria-label={t("changes.targetList")}
+                value={targetList}
+                disabled={!assignable}
+                onChange={(event) => onTargetChange(event.currentTarget.value)}
+            >
+                {lists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                        {list.name}
+                    </option>
+                ))}
+            </select>
+            <button disabled={!assignable} onClick={onAssign}>
+                <VscArrowRight />
+                {t("changes.assign")}
+            </button>
+        </>
+    );
+}
+
 /** Presents immutable host snapshots; only identities and explicit selections are sent back. */
 export function PartialChangesApp() {
     const api = getVsCodeApi<PartialEditorOutbound, SavedSelection>();
@@ -288,6 +352,8 @@ export function PartialChangesApp() {
     const [side, setSide] = useState<"working" | "index">("working");
     const [targetList, setTargetList] = useState("default");
     const [message, setMessage] = useState(() => api.getState()?.message ?? "");
+    // The preview repeats the diff for simple edits, so it stays out of the way until asked for.
+    const [showPreview, setShowPreview] = useState(() => api.getState()?.showPreview === true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [commit, setCommit] = useState("");
@@ -346,16 +412,15 @@ export function PartialChangesApp() {
                     contentId: data?.contentId,
                     ids: [...selected],
                     message,
+                    showPreview,
                 }),
             150,
         );
         return () => window.clearTimeout(timer);
-    }, [api, data?.contentId, message, selected]);
-    const deferred = useDeferredValue(selected);
-    const preview = useMemo(() => {
-        if (!data) return "";
-        return selectedContent(data.file.base, data.file.blocks, [...deferred]);
-    }, [data, deferred]);
+    }, [api, data?.contentId, message, selected, showPreview]);
+    // A reload replaces the file and its selection together; deferring them apart pairs new blocks with stale IDs.
+    const view = useMemo(() => ({ data, selected }), [data, selected]);
+    const deferred = useDeferredValue(view);
     const toggle = (ids: string[]) => {
         setSelected((previous) => {
             const next = new Set(previous);
@@ -398,7 +463,7 @@ export function PartialChangesApp() {
     const locked = busy || commit.length > 0 || removed;
     const mutable = !locked && selected.size > 0;
     const assignable = mutable && side === "working";
-    const committable = mutable && message.trim().length > 0 && deferred === selected;
+    const committable = mutable && message.trim().length > 0 && deferred === view;
     return (
         <main className="partial-changes">
             <header className="partial-toolbar">
@@ -428,6 +493,14 @@ export function PartialChangesApp() {
                     <VscRefresh />
                 </button>
                 <button
+                    title={t("changes.togglePreview")}
+                    aria-label={t("changes.togglePreview")}
+                    aria-pressed={showPreview}
+                    onClick={() => setShowPreview((shown) => !shown)}
+                >
+                    <VscOpenPreview />
+                </button>
+                <button
                     title={t("changes.fullDiff")}
                     aria-label={t("changes.fullDiff")}
                     onClick={() => api.postMessage({ type: "openNative" })}
@@ -436,7 +509,7 @@ export function PartialChangesApp() {
                 </button>
             </header>
             <PartialStatus data={data} error={error} />
-            <div className="partial-panes">
+            <div className={showPreview ? "partial-panes" : "partial-panes partial-panes-single"}>
                 <section className="partial-pane">
                     <div className="partial-pane-title">
                         {data ? (
@@ -467,10 +540,11 @@ export function PartialChangesApp() {
                         <div role="status">{t("changes.loading")}</div>
                     )}
                 </section>
-                <section className="partial-pane">
-                    <div className="partial-pane-title">{t("changes.preview")}</div>
-                    <SelectionPreview content={preview} filePath={data?.file.path ?? ""} />
-                </section>
+                <PreviewPane
+                    shown={showPreview}
+                    data={deferred.data}
+                    selected={deferred.selected}
+                />
             </div>
             <footer className="partial-footer">
                 <div className="partial-actions">
@@ -480,22 +554,13 @@ export function PartialChangesApp() {
                         assignable={assignable}
                         send={selectedOperation}
                     />
-                    <select
-                        aria-label={t("changes.targetList")}
-                        value={targetList}
-                        disabled={!assignable}
-                        onChange={(event) => setTargetList(event.currentTarget.value)}
-                    >
-                        {(data?.lists.lists ?? []).map((list) => (
-                            <option key={list.id} value={list.id}>
-                                {list.name}
-                            </option>
-                        ))}
-                    </select>
-                    <button disabled={!assignable} onClick={() => send("assign")}>
-                        <VscArrowRight />
-                        {t("changes.assign")}
-                    </button>
+                    <AssignActions
+                        lists={data?.lists.lists ?? []}
+                        targetList={targetList}
+                        assignable={assignable}
+                        onTargetChange={setTargetList}
+                        onAssign={() => send("assign")}
+                    />
                     <button disabled={!assignable} onClick={() => send("use")}>
                         <VscCheck />
                         {t("changes.useSelection")}

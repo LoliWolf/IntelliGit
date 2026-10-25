@@ -66,6 +66,18 @@ export function changelistFiles(
     });
 }
 
+/** One list and no line selections is plain Git use, so the panel keeps its pre-changelist layout. */
+export function changelistsInUse(state: ChangelistState, hasRecoveryIssues: boolean): boolean {
+    return (
+        state.lists.length > 1 ||
+        hasRecoveryIssues ||
+        state.targetOperationSummary?.phase === "reviewRequired" ||
+        Object.values(state.changes).some(
+            (ownership) => Object.keys(ownership?.selections ?? {}).length > 0,
+        )
+    );
+}
+
 /** Keeps list filters and checkboxes repository-scoped without launching Git on UI selections. */
 export function useChangelists(props: CommitTabProps) {
     const root = props.repositoryRoot;
@@ -127,10 +139,16 @@ export function useChangelists(props: CommitTabProps) {
                                   previous.metadata?.revision === message.state.revision
                                       ? previous.metadata
                                       : message.state,
-                              filter: resolveViewScope(
+                              // A view saved while several lists existed must not scope plain mode, even for one render.
+                              filter: changelistsInUse(
                                   message.state,
-                                  previous.root === root ? previous.filter : saved.filter,
-                              ),
+                                  message.hasRecoveryIssues === true,
+                              )
+                                  ? resolveViewScope(
+                                        message.state,
+                                        previous.root === root ? previous.filter : saved.filter,
+                                    )
+                                  : "all",
                               checked: previous.root === root ? previous.checked : saved.checked,
                               busy: message.busy === true || pendingSave.current?.root === root,
                               hasRecoveryIssues: message.hasRecoveryIssues === true,
@@ -352,10 +370,6 @@ export function useChangelists(props: CommitTabProps) {
         saveShelf,
         notice: state.root === root ? state.notice : undefined,
         openPartial,
-        openFile: (path: string, listId: string) => {
-            if (root)
-                api.postMessage({ type: "openPartialChanges", repositoryRoot: root, path, listId });
-        },
         commit,
         busy,
         hasRecoveryIssues: state.root === root && state.hasRecoveryIssues === true,

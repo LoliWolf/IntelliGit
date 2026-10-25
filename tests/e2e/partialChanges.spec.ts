@@ -51,6 +51,11 @@ async function createList(page: Page, frame: FrameLocator, name: string): Promis
     ).toContainText([name]);
 }
 
+/** The list picker, list headers and the Partial changes action render only once a second list exists. */
+async function revealLists(page: Page, frame: FrameLocator): Promise<void> {
+    await createList(page, frame, "Second list");
+}
+
 test.describe("Selected changes and changelists", () => {
     test.use({ scenario: "clean" });
 
@@ -410,6 +415,7 @@ test.describe("Selected changes and changelists", () => {
             await dismissFirstRunDialogs(page);
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const sidebar = await new IntelliGitView(page).reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toHaveValue("all");
@@ -577,6 +583,7 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const view = new IntelliGitView(page);
             const sidebar = await view.reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
@@ -636,6 +643,7 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const view = new IntelliGitView(page);
             const sidebar = await view.reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
@@ -726,6 +734,7 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const view = new IntelliGitView(page);
             const sidebar = await view.reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
@@ -734,6 +743,9 @@ test.describe("Selected changes and changelists", () => {
             const editor = await view.revealPartialChanges(FILE);
             await expect(editor.locator(".partial-block")).toHaveCount(2);
             await editor.getByRole("checkbox", { name: "Select block 1", exact: true }).uncheck();
+            await editor
+                .getByRole("button", { name: "Show selection preview", exact: true })
+                .click();
             await expect(editor.getByLabel("Selection preview", { exact: true })).toContainText(
                 "first = 3",
             );
@@ -782,10 +794,11 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             let view = new IntelliGitView(page);
             let sidebar = await view.reveal();
+            // The list picker renders only once a second list exists.
+            await createList(page, sidebar, "Feature");
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
-            await createList(page, sidebar, "Feature");
             await createList(page, sidebar, "Bug");
             await chooseFile(sidebar);
             await sidebar
@@ -856,6 +869,7 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const view = new IntelliGitView(page);
             const sidebar = await view.reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
@@ -869,6 +883,9 @@ test.describe("Selected changes and changelists", () => {
             await expect(
                 editor.getByRole("button", { name: "Use selection for commit", exact: true }),
             ).toBeEnabled();
+            await editor
+                .getByRole("button", { name: "Show selection preview", exact: true })
+                .click();
             const preview = editor.getByLabel("Selection preview", { exact: true });
             await expect(preview.locator('span[style*="color"]')).not.toHaveCount(0);
             await expect(preview).toHaveAttribute("contenteditable", "false");
@@ -910,6 +927,7 @@ test.describe("Selected changes and changelists", () => {
             await waitForE2eChannelReady(fixtureWorkspace.channelDir);
             const view = new IntelliGitView(page);
             const sidebar = await view.reveal();
+            await revealLists(page, sidebar);
             await expect(
                 sidebar.getByRole("combobox", { name: "Changelists", exact: true }),
             ).toBeVisible();
