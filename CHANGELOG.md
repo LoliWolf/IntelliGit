@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Editor blame annotations now shade committed lines by author date, from the active editor background for the oldest changes to `#83bf54` green for the newest. The bounded palette keeps text readable across themes and leaves uncommitted lines neutral.
+- Editor blame annotations now use green shading to distinguish newer commits from older ones. Uncommitted lines remain untinted.
 
 ## [0.40.0] - 2026-10-24
 

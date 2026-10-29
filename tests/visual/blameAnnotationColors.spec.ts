@@ -24,26 +24,27 @@ test("blame age shades retain exact endpoints and readable text on customized th
         if (!shade) throw new Error("Missing committed shade.");
         return shade;
     });
-    const backgrounds = [
-        "#1f1f1f",
-        "#ffffff",
-        "#000000",
-        "#fefefe",
-        "#303446",
-        "#2d1050",
-        "#62522c",
-        "#104c5b",
-        "#123912",
-        "#83bf54",
-        "#898989",
-        "#ff0000",
-        "#0000ff",
-        "#00ff00",
-        "#4a4a4a",
-        "#858585",
-    ];
+    // Neutral labels intentionally inherit the theme, so customize both foreground and background.
+    const themes = [
+        ["#1f1f1f", "rgba(204, 204, 204, 0.7)"],
+        ["#ffffff", "#3b3b3b"],
+        ["#000000", "#a0a0a0"],
+        ["#fefefe", "#5b5b5b"],
+        ["#303446", "#b2b2b2"],
+        ["#2d1050", "#b2b2b2"],
+        ["#62522c", "#eeeeee"],
+        ["#104c5b", "#dddddd"],
+        ["#123912", "#b2b2b2"],
+        ["#83bf54", "#333333"],
+        ["#898989", "#181818"],
+        ["#ff0000", "#111111"],
+        ["#0000ff", "#dddddd"],
+        ["#00ff00", "#333333"],
+        ["#4a4a4a", "#c8c8c8"],
+        ["#858585", "#111111"],
+    ] as const;
     const samples = await page.evaluate(
-        ({ shades, backgrounds }) => {
+        ({ shades, themes }) => {
             const canvas = document.createElement("canvas");
             canvas.width = canvas.height = 1;
             const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -58,10 +59,14 @@ test("blame age shades retain exact endpoints and readable text on customized th
             const probe = document.createElement("span");
             probe.textContent = "Ada 2020-01-01";
             document.body.append(probe);
-            const result = backgrounds.flatMap((background) => {
+            const result = themes.flatMap(([background, descriptionForeground]) => {
                 document.documentElement.style.setProperty(
                     "--vscode-editor-background",
                     background,
+                );
+                document.documentElement.style.setProperty(
+                    "--vscode-descriptionForeground",
+                    descriptionForeground,
                 );
                 return shades.map((shade, age) => {
                     for (const [property, value] of [
@@ -79,19 +84,25 @@ test("blame age shades retain exact endpoints and readable text on customized th
                         foreground: rgba(style.color),
                         background: rgba(style.backgroundColor),
                         expectedBackground: rgba(background),
+                        expectedDescriptionForeground: rgba(descriptionForeground),
                     };
                 });
             });
             probe.remove();
             return result;
         },
-        { shades, backgrounds },
+        { shades, themes },
     );
     const unreadable = samples
         .map((sample) => ({
             theme: sample.theme,
             age: sample.age,
-            ratio: oracles.get("contrast").contrastRatio(sample.foreground, sample.background),
+            ratio: oracles
+                .get("contrast")
+                .contrastRatio(
+                    oracles.get("contrast").compositeOver(sample.foreground, sample.background),
+                    sample.background,
+                ),
         }))
         .filter((sample) => sample.ratio < 4.5);
     expect(unreadable).toEqual([]);
@@ -99,7 +110,9 @@ test("blame age shades retain exact endpoints and readable text on customized th
         samples.filter(
             (sample) =>
                 sample.age === 0 &&
-                JSON.stringify(sample.background) !== JSON.stringify(sample.expectedBackground),
+                (JSON.stringify(sample.background) !== JSON.stringify(sample.expectedBackground) ||
+                    JSON.stringify(sample.foreground) !==
+                        JSON.stringify(sample.expectedDescriptionForeground)),
         ),
     ).toEqual([]);
     expect(

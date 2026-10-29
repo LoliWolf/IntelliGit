@@ -12,6 +12,13 @@ const line = (authorTime: number, commit = "a".repeat(40)): BlameLine => ({
 });
 
 describe("blame age colors", () => {
+    it("keeps the oldest label on the theme's muted description foreground", () => {
+        expect(blameAnnotationColors(line(100), { oldest: 100, newest: 900 })).toEqual({
+            backgroundColor: "var(--vscode-editor-background)",
+            color: "var(--vscode-descriptionForeground)",
+        });
+    });
+
     it("orders actual timestamps rather than author names, hashes or input positions", () => {
         const lines = [line(900, "c".repeat(40)), line(100), line(500, "b".repeat(40))];
         const range = blameAgeRange(lines);
@@ -62,7 +69,7 @@ describe("blame age colors", () => {
         expect(blameAnnotationColors(line(100), undefined)).toBeUndefined();
     });
 
-    it("does not inherit a translucent background's alpha for annotation text", () => {
+    it("does not inherit a translucent background's alpha for tinted annotation text", () => {
         expect(blameAnnotationColors(line(500), { oldest: 100, newest: 900 })?.color).toMatch(
             / \/ 1\)$/,
         );

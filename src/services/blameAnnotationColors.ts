@@ -53,7 +53,12 @@ const PALETTE: readonly AnnotationColors[] = Array.from({ length: 101 }, (_, per
               : `color-mix(in srgb, ${RECENT_BACKGROUND} ${percent}%, ${EDITOR_BACKGROUND})`;
     return Object.freeze({
         backgroundColor,
-        color: percent === 100 ? "#000000" : contrastingText(backgroundColor),
+        color:
+            percent === 0
+                ? "var(--vscode-descriptionForeground)"
+                : percent === 100
+                  ? "#000000"
+                  : contrastingText(backgroundColor),
     });
 });
 

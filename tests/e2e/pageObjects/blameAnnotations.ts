@@ -4,6 +4,7 @@ import { oracles } from "../../oracles";
 
 interface BlameAnnotationProbe {
     readonly editorBackground: Rgba;
+    readonly descriptionForeground: Rgba;
     readonly userAgent: string;
     readonly annotations: {
         readonly label: string;
@@ -30,6 +31,9 @@ async function readBlameAnnotations(editor: Locator): Promise<BlameAnnotationPro
         return {
             editorBackground: rgba(
                 getComputedStyle(root).getPropertyValue("--vscode-editor-background").trim(),
+            ),
+            descriptionForeground: rgba(
+                getComputedStyle(root).getPropertyValue("--vscode-descriptionForeground").trim(),
             ),
             userAgent: navigator.userAgent,
             annotations: Array.from(root.querySelectorAll(".view-line span")).flatMap((span) => {
@@ -79,10 +83,23 @@ export async function expectBlameAgeColors(
                 );
                 const ratio = oracles
                     .get("contrast")
-                    .contrastRatio(annotation.foreground, annotation.background);
+                    .contrastRatio(
+                        oracles
+                            .get("contrast")
+                            .compositeOver(annotation.foreground, annotation.background),
+                        annotation.background,
+                    );
+                const foregroundMatches =
+                    percent === 0
+                        ? (["r", "g", "b", "a"] as const).every(
+                              (channel) =>
+                                  annotation.foreground[channel] ===
+                                  current.descriptionForeground[channel],
+                          )
+                        : annotation.foreground.a === 1;
                 return backgroundMatches &&
                     annotation.background.a === 1 &&
-                    annotation.foreground.a === 1 &&
+                    foregroundMatches &&
                     ratio >= 4.5
                     ? []
                     : [{ index, percent, expected, ...annotation, ratio }];

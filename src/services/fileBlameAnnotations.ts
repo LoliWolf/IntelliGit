@@ -55,7 +55,7 @@ export class FileBlameAnnotations implements vscode.Disposable {
             before: {
                 width: "38ch",
                 margin: "0 1.5em 0 0",
-                color: new vscode.ThemeColor("editor.foreground"),
+                color: new vscode.ThemeColor("descriptionForeground"),
                 backgroundColor: new vscode.ThemeColor("editor.background"),
                 textDecoration:
                     "none; white-space: pre; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;",

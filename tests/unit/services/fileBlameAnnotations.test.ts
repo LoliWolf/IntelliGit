@@ -134,6 +134,16 @@ const change = () => {
 };
 
 describe("FileBlameAnnotations", () => {
+    it("inherits muted theme text for neutral annotations", () => {
+        expect(mocks.createDecoration).toHaveBeenCalledWith(
+            expect.objectContaining({
+                before: expect.objectContaining({
+                    color: expect.objectContaining({ id: "descriptionForeground" }),
+                }),
+            }),
+        );
+    });
+
     it("shades committed annotations by author time without treating unsaved lines as recent commits", async () => {
         text = "old\nmiddle\nnew\nunsaved\n";
         (document as { lineCount: number }).lineCount = 5;
@@ -160,12 +170,14 @@ describe("FileBlameAnnotations", () => {
             (entry: vscode.DecorationOptions) => entry.renderOptions?.before,
         );
         expect(shades[0]?.backgroundColor).toBe("var(--vscode-editor-background)");
+        expect(shades[0]?.color).toBe("var(--vscode-descriptionForeground)");
         expect(shades[1]?.backgroundColor).toBe(
             "color-mix(in srgb, #83bf54 50%, var(--vscode-editor-background))",
         );
         expect(shades[2]?.backgroundColor).toBe("#83bf54");
         expect(shades[2]?.color).toBe("#000000");
         expect(shades[3]?.backgroundColor).toBeUndefined();
+        expect(shades[3]?.color).toBeUndefined();
         expect(shades[3]?.contentText).toContain("Uncommitted changes");
     });
 
